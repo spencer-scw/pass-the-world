@@ -10,7 +10,22 @@ export async function mention(env: Env, userId: string | null): Promise<string> 
 export const gameLink = (env: Env, game: Game) => `${env.config.siteUrl}/#/games/${game.id}`;
 /** A real path (not a #route) so link previews can show the game; see invite-page.ts. */
 export const inviteLink = (env: Env, inviteCode: string) => `${env.config.siteUrl}/join/${inviteCode}`;
-export const logoUrl = (env: Env) => `${env.config.siteUrl}/logo.png`;
+
+/** Whether Discord's servers could fetch from this URL (not localhost or a private network address). */
+export function isPublicUrl(url: string): boolean {
+  const host = new URL(url).hostname;
+  return !(
+    host === 'localhost' ||
+    host.endsWith('.local') ||
+    host === '[::1]' ||
+    /^(127|10)\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+  );
+}
+
+/** The logo for embeds and previews, or undefined when Discord couldn't load it (it would show as broken). */
+export const logoUrl = (env: Env) => (isPublicUrl(env.config.siteUrl) ? `${env.config.siteUrl}/logo.png` : undefined);
 
 /** Posts the game's invite link to its webhook. */
 export async function announceInvite(env: Env, game: Game, reset = false): Promise<void> {

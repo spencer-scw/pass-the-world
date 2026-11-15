@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formatMention, notifications } from '../src/copy/notifications';
+import { isPublicUrl } from '../src/notify';
 
 describe('formatMention', () => {
   it('pings Discord users', () => expect(formatMention({ display_name: 'Sam', discord_id: '123' })).toBe('<@123>'));
@@ -46,5 +47,22 @@ describe('notifications', () => {
     const card = notifications.invite({ turnMinutes: 60, orderMode: 'strict', link: 'L', reset: false });
     expect(card).toMatchObject({ title: '📨 Come play!', url: 'L' });
     expect(card.description).toContain('[Join the game](L)');
+  });
+});
+
+describe('isPublicUrl', () => {
+  it('rejects addresses Discord cannot reach', () => {
+    for (const url of [
+      'http://localhost:5173',
+      'http://127.0.0.1',
+      'http://192.168.1.5',
+      'http://172.20.0.2',
+      'http://box.local',
+    ])
+      expect(isPublicUrl(url), url).toBe(false);
+  });
+  it('accepts public hosts', () => {
+    expect(isPublicUrl('https://pass-the-world.example.workers.dev')).toBe(true);
+    expect(isPublicUrl('http://172.32.0.1')).toBe(true);
   });
 });

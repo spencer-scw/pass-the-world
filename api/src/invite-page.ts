@@ -32,7 +32,7 @@ invitePage.get('/join/:code', async (c) => {
     'og:title': meta.title,
     'og:description': meta.description,
     'og:url': `${site}/join/${encodeURIComponent(code)}`,
-    'og:image': logoUrl(c.env),
+    ...(logoUrl(c.env) ? { 'og:image': logoUrl(c.env)! } : {}),
   };
   const html = `<!doctype html>
 <html lang="en">
