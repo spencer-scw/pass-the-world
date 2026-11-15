@@ -1,0 +1,32 @@
+# Self-hosting: `cp .env.example .env`, fill it in, then `docker compose up -d --build`.
+# Caddy gets a TLS certificate for DOMAIN automatically (ports 80 and 443 must reach this machine).
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      PUBLIC_URL: https://${DOMAIN:?set DOMAIN in .env}
+      ENVIRONMENT: production
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
+      MAX_SNAPSHOT_MB: ${MAX_SNAPSHOT_MB:-64}
+    volumes:
+      - data:/data # SQLite database + every save snapshot. Back this up.
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - app
+
+volumes:
+  data:
+  caddy-data:
