@@ -132,6 +132,14 @@ pnpm run deploy                               # builds the site, deploys the sit
 Add `<SITE_URL>/api/auth/discord/callback` as a redirect in the Discord app. To update a deployment, run
 `pnpm db:migrate:remote` (if there are new migrations) and `pnpm run deploy` again.
 
+#### Continuous deployment
+
+`.github/workflows/ci.yml` checks every pull request (format, types, tests, site build). When a PR is merged, the
+same checks run on `main` and, if they pass, the workflow applies D1 migrations and deploys. It needs two repository
+secrets: `CLOUDFLARE_API_TOKEN` (an API token with **Workers Scripts: Edit** and **D1: Edit**, plus **Workers Routes:
+Edit** on the zone for a custom domain) and `CLOUDFLARE_ACCOUNT_ID`. Discord credentials stay in Cloudflare's own
+secret store and aren't touched by deploys.
+
 ### Self-hosted (Docker)
 
 The server needs Docker, a domain or subdomain pointing at its public IP, and ports 80 and 443 open.
