@@ -1,6 +1,7 @@
 import { createRoute } from '@hono/zod-openapi';
 import type { Env, Game, Turn } from './types';
 import {
+  currentTurn,
   getGame,
   getMembership,
   getSnapshot,
@@ -147,6 +148,26 @@ export async function skipTurn(env: Env, turn: Turn, now: number, reason: SkipRe
   );
   await createNextTurn(env, turn.game_id, now);
   return true;
+}
+
+/**
+ * Closes the open turn of a game that was just finished, and announces the end. An active turn keeps its latest
+ * checkpoint (the mod's next heartbeat sends the player back to the menu); a waiting turn is simply closed.
+ * Call after the game's status is set, so no next turn gets opened.
+ */
+export async function closeFinishedGame(env: Env, gameId: string, now: number): Promise<void> {
+  const turn = await currentTurn(env, gameId);
+  let interrupted: { seq: number; player: string; keptCheckpoint: boolean } | null = null;
+  if (turn?.status === 'active') {
+    const checkpoint = await latestCheckpoint(env, turn.id);
+    if (await markTurnExpired(env, turn.id, checkpoint?.id ?? null, now)) {
+      if (checkpoint) await setHeadSnapshot(env, gameId, checkpoint.id);
+      interrupted = { seq: turn.seq, player: await mention(env, turn.user_id), keptCheckpoint: checkpoint != null };
+    }
+  } else if (turn?.status === 'waiting') {
+    await markTurnSkipped(env, turn.id, now);
+  }
+  await notify(env, await getGame(env, gameId), notifications.gameFinished({ interrupted }));
 }
 
 /** Cron: expire overdue turns and skip no-shows. */

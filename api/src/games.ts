@@ -54,7 +54,7 @@ import {
 } from './schemas';
 import { snapshotInfo, storeSnapshot } from './storage';
 import { announceInvite } from './notify';
-import { createNextTurn, expireTurn, reassignWaitingTurn, skipTurn, turnSummary } from './turns';
+import { closeFinishedGame, createNextTurn, expireTurn, reassignWaitingTurn, skipTurn, turnSummary } from './turns';
 import type { Game } from './types';
 import { HttpError, newId, randomCode } from './util';
 
@@ -172,7 +172,8 @@ gameRoutes.openapi(
     tags: ['Games'],
     summary: 'Update settings or status',
     description:
-      'Only the fields sent are changed. Status can go running ↔ paused, or to finished. Unpausing restarts the ' +
+      'Only the fields sent are changed. Status can go running ↔ paused, or to finished. Finishing closes the open ' +
+      'turn (an active one keeps its last checkpoint) and posts to Discord. Unpausing restarts the ' +
       "waiting player's start window. Changing `orderMode` re-picks who the waiting turn belongs to. World and " +
       'character names can only change during setup.',
     ...signedIn,
@@ -200,6 +201,7 @@ gameRoutes.openapi(
         throw new HttpError(409, errors.invalidStatusChange(game.status, body.status));
     }
     await updateGame(c.env, gameId, body);
+    if (body.status === 'finished') await closeFinishedGame(c.env, gameId, Date.now());
 
     if (body.status === 'running') {
       // Unpausing restarts the start window for whoever is up.

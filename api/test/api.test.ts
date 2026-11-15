@@ -81,6 +81,64 @@ describe('PATCH /games/:id', () => {
   });
 });
 
+describe('finishing a game', () => {
+  /** A running game whose turn #1 is in the given state. Returns the ids involved. */
+  async function gameWithTurn(status: 'waiting' | 'active', withCheckpoint = false) {
+    const token = await signIn('Alice');
+    const id = await createGame(token, { discordWebhookUrl: webhook });
+    const { userId } = (await call('GET', `/games/${id}`, { token })).body.me;
+    const now = Date.now();
+    const snap = async (sid: string, kind: string, turnId: string | null) =>
+      env.db.run(
+        `INSERT INTO snapshots (id, game_id, turn_id, kind, sha256, size, r2_key, uploaded_by, created_at)
+         VALUES (?, ?, ?, ?, 'x', 1, 'k', ?, ?)`,
+        sid,
+        id,
+        turnId,
+        kind,
+        userId,
+        now,
+      );
+    await snap('initial', 'initial', null);
+    await env.db.run(`UPDATE games SET status = 'running', head_snapshot_id = 'initial' WHERE id = ?`, id);
+    await env.db.run(
+      `INSERT INTO turns (id, game_id, seq, user_id, status, base_snapshot_id, available_at, claimed_at, deadline_at)
+       VALUES ('t1', ?, 1, ?, ?, 'initial', ?, ?, ?)`,
+      id,
+      userId,
+      status,
+      now,
+      status === 'active' ? now : null,
+      status === 'active' ? now + 3_600_000 : null,
+    );
+    if (withCheckpoint) await snap('cp', 'checkpoint', 't1');
+    return { token, id };
+  }
+
+  const finish = (token: string, id: string) => call('PATCH', `/games/${id}`, { token, body: { status: 'finished' } });
+
+  it('ends an active turn, keeping its last checkpoint, and opens no new one', async () => {
+    const { token, id } = await gameWithTurn('active', true);
+    expect((await finish(token, id)).status).toBe(200);
+
+    const detail = (await call('GET', `/games/${id}`, { token })).body;
+    expect(detail.currentTurnId).toBeNull();
+    expect(detail.turns).toEqual([expect.objectContaining({ seq: 1, status: 'expired' })]);
+    expect(await env.db.first(`SELECT head_snapshot_id AS head FROM games WHERE id = ?`, id)).toEqual({ head: 'cp' });
+    expect(posted.at(-1)?.embed).toMatchObject({ title: '🏁 Game over' });
+    expect(posted.at(-1)?.embed.description).toContain("during **Alice**'s turn #1");
+  });
+
+  it('closes a waiting turn', async () => {
+    const { token, id } = await gameWithTurn('waiting');
+    await finish(token, id);
+    const detail = (await call('GET', `/games/${id}`, { token })).body;
+    expect(detail.currentTurnId).toBeNull();
+    expect(detail.turns).toEqual([expect.objectContaining({ seq: 1, status: 'skipped' })]);
+    expect(posted.at(-1)?.embed.description).toBe('An admin finished the game. Thanks for playing!');
+  });
+});
+
 describe('invite announcements', () => {
   const invites = () => posted.filter((p) => p.embed.url.includes('/join/'));
 

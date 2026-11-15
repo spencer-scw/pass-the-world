@@ -110,6 +110,24 @@ export const notifications = {
     ],
   }),
 
+  /** An admin finished the game. `interrupted` is the turn that was in progress, if any. */
+  gameFinished: (p: { interrupted: { seq: number; player: string; keptCheckpoint: boolean } | null }): Card => ({
+    title: '🏁 Game over',
+    description: p.interrupted
+      ? `An admin finished the game during ${p.interrupted.player}'s turn #${p.interrupted.seq}. Thanks for playing!`
+      : 'An admin finished the game. Thanks for playing!',
+    color: color.gold,
+    fields: [
+      {
+        name: 'Final world',
+        value:
+          p.interrupted && !p.interrupted.keptCheckpoint
+            ? `As it was before turn #${p.interrupted.seq}; download it from the game page`
+            : 'Download it from the game page',
+      },
+    ],
+  }),
+
   turnSkipped: (p: { seq: number; player: string; reason: SkipReason }): Card => ({
     title: `⏭️ Turn #${p.seq} skipped`,
     description:

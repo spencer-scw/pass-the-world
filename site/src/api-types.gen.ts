@@ -628,7 +628,7 @@ export interface paths {
         head?: never;
         /**
          * Update settings or status
-         * @description Only the fields sent are changed. Status can go running ↔ paused, or to finished. Unpausing restarts the waiting player's start window. Changing `orderMode` re-picks who the waiting turn belongs to. World and character names can only change during setup.
+         * @description Only the fields sent are changed. Status can go running ↔ paused, or to finished. Finishing closes the open turn (an active one keeps its last checkpoint) and posts to Discord. Unpausing restarts the waiting player's start window. Changing `orderMode` re-picks who the waiting turn belongs to. World and character names can only change during setup.
          */
         patch: {
             parameters: {

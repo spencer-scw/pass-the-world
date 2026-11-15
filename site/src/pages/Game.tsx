@@ -88,7 +88,9 @@ export function GamePage({ id, me }: { id: string; me: Me }) {
               <button
                 className="danger"
                 onClick={() =>
-                  confirm('End this game for good?') && act(`/games/${id}`, 'PATCH', { status: 'finished' })
+                  confirm(
+                    `End this game for good?${current ? ` Turn #${current.seq} ends now; anything since its last checkpoint is lost.` : ''}`,
+                  ) && act(`/games/${id}`, 'PATCH', { status: 'finished' })
                 }
               >
                 Finish game
