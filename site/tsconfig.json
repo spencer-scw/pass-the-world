@@ -1,0 +1,5 @@
+{
+  // Solution file: editors and `tsc -b` use the referenced project that contains each file.
+  "files": [],
+  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }]
+}
