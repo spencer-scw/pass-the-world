@@ -1,0 +1,2732 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Pass the World API",
+    "version": "0.1.0",
+    "description": "Backend for Pass the World: players take turns with one shared Terraria world and character. Used by the website and the tModLoader mod. Times are Unix epoch milliseconds."
+  },
+  "servers": [
+    {
+      "url": "/api"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Auth",
+      "description": "Website sign-in and sessions."
+    },
+    {
+      "name": "Mod linking",
+      "description": "Linking the tModLoader mod to an account with a short code."
+    },
+    {
+      "name": "Games",
+      "description": "Creating and managing games."
+    },
+    {
+      "name": "Players",
+      "description": "Invites, turn order and player settings."
+    },
+    {
+      "name": "Turns",
+      "description": "Claiming, playing and skipping turns."
+    },
+    {
+      "name": "Saves",
+      "description": "Uploading, downloading and rolling back save bundles."
+    },
+    {
+      "name": "System",
+      "description": "Operational endpoints."
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A session token. The website gets one from Discord sign-in; the mod gets one through the /device link flow."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "example": "It is not your turn yet"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "description": "Every error response has this shape."
+      },
+      "Token": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ]
+      },
+      "DevLoginRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "Ok": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "ok"
+        ]
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+          },
+          "displayName": {
+            "type": "string",
+            "example": "Sam"
+          }
+        },
+        "required": [
+          "id",
+          "displayName"
+        ]
+      },
+      "DeviceStart": {
+        "type": "object",
+        "properties": {
+          "deviceCode": {
+            "type": "string",
+            "description": "The mod's secret for polling. Never shown to the player."
+          },
+          "userCode": {
+            "type": "string",
+            "description": "What the player types on the site.",
+            "example": "KXQP-7M2R"
+          },
+          "verifyUrl": {
+            "type": "string",
+            "description": "Site page with the code pre-filled."
+          },
+          "intervalSeconds": {
+            "type": "integer",
+            "example": 5
+          },
+          "expiresIn": {
+            "type": "integer",
+            "description": "Seconds until the code expires.",
+            "example": 600
+          }
+        },
+        "required": [
+          "deviceCode",
+          "userCode",
+          "verifyUrl",
+          "intervalSeconds",
+          "expiresIn"
+        ]
+      },
+      "DeviceApproveRequest": {
+        "type": "object",
+        "properties": {
+          "userCode": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Case and dashes don't matter.",
+            "example": "KXQP-7M2R"
+          }
+        },
+        "required": [
+          "userCode"
+        ]
+      },
+      "DevicePoll": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "approved"
+                ]
+              },
+              "token": {
+                "type": "string"
+              },
+              "user": {
+                "$ref": "#/components/schemas/User"
+              }
+            },
+            "required": [
+              "status",
+              "token",
+              "user"
+            ]
+          }
+        ]
+      },
+      "DevicePollRequest": {
+        "type": "object",
+        "properties": {
+          "deviceCode": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "deviceCode"
+        ]
+      },
+      "GameSummary": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Game"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "role": {
+                "$ref": "#/components/schemas/Role"
+              }
+            },
+            "required": [
+              "role"
+            ]
+          }
+        ]
+      },
+      "GameStatus": {
+        "type": "string",
+        "enum": [
+          "setup",
+          "running",
+          "paused",
+          "finished"
+        ]
+      },
+      "OrderMode": {
+        "type": "string",
+        "enum": [
+          "strict",
+          "open"
+        ],
+        "description": "strict: fixed rotation. open: anyone except whoever played last."
+      },
+      "Role": {
+        "type": "string",
+        "enum": [
+          "admin",
+          "player"
+        ]
+      },
+      "Game": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/GameStatus"
+          },
+          "worldName": {
+            "type": "string"
+          },
+          "playerName": {
+            "type": "string"
+          },
+          "turnMinutes": {
+            "type": "integer"
+          },
+          "orderMode": {
+            "$ref": "#/components/schemas/OrderMode"
+          },
+          "startWindowHours": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "headSnapshotId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88",
+            "description": "The save the next turn starts from."
+          },
+          "createdAt": {
+            "type": "integer",
+            "description": "Unix epoch milliseconds",
+            "format": "int64",
+            "example": 1763164800000
+          },
+          "inviteCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Admins only."
+          },
+          "discordWebhookUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Admins only."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "worldName",
+          "playerName",
+          "turnMinutes",
+          "orderMode",
+          "startWindowHours",
+          "headSnapshotId",
+          "createdAt"
+        ]
+      },
+      "CreatedGame": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "CreateGameRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "example": "Moon Lord or Bust"
+          },
+          "worldName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "In-game world name.",
+            "example": "Shared Isle"
+          },
+          "playerName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32,
+            "description": "In-game character name.",
+            "example": "Hero"
+          },
+          "turnMinutes": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 1440,
+            "default": 60
+          },
+          "orderMode": {
+            "$ref": "#/components/schemas/OrderMode"
+          },
+          "startWindowHours": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 336,
+            "default": 24,
+            "description": "Strict order: auto-skip a turn not started within this many hours. null = never."
+          },
+          "discordWebhookUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "default": null
+          }
+        },
+        "required": [
+          "name",
+          "worldName",
+          "playerName"
+        ]
+      },
+      "GameDetail": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "$ref": "#/components/schemas/Game"
+          },
+          "me": {
+            "type": "object",
+            "properties": {
+              "userId": {
+                "type": "string",
+                "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+              },
+              "role": {
+                "$ref": "#/components/schemas/Role"
+              }
+            },
+            "required": [
+              "userId",
+              "role"
+            ]
+          },
+          "players": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Player"
+            }
+          },
+          "currentTurnId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+          },
+          "turns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Turn"
+            },
+            "description": "Latest 100, newest first."
+          },
+          "snapshots": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Snapshot"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "turnId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+                    }
+                  },
+                  "required": [
+                    "turnId"
+                  ]
+                }
+              ]
+            },
+            "description": "Latest 100, newest first."
+          }
+        },
+        "required": [
+          "game",
+          "me",
+          "players",
+          "currentTurnId",
+          "turns",
+          "snapshots"
+        ]
+      },
+      "Player": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "description": "0 goes first."
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "active": {
+            "type": "boolean",
+            "description": "false = sitting out; skipped by the rotation."
+          }
+        },
+        "required": [
+          "userId",
+          "displayName",
+          "position",
+          "role",
+          "active"
+        ]
+      },
+      "Turn": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+          },
+          "seq": {
+            "type": "integer",
+            "description": "Turn number, starting at 1."
+          },
+          "status": {
+            "$ref": "#/components/schemas/TurnStatus"
+          },
+          "userId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88",
+            "description": "null while an open-order turn is unclaimed."
+          },
+          "userName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "availableAt": {
+            "type": "integer",
+            "description": "Unix epoch milliseconds",
+            "format": "int64",
+            "example": 1763164800000
+          },
+          "claimedAt": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Unix epoch milliseconds",
+            "format": "int64",
+            "example": 1763164800000
+          },
+          "deadlineAt": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Unix epoch milliseconds",
+            "format": "int64",
+            "example": 1763164800000
+          },
+          "endedAt": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Unix epoch milliseconds",
+            "format": "int64",
+            "example": 1763164800000
+          }
+        },
+        "required": [
+          "id",
+          "seq",
+          "status",
+          "userId",
+          "userName",
+          "availableAt",
+          "claimedAt",
+          "deadlineAt",
+          "endedAt"
+        ]
+      },
+      "TurnStatus": {
+        "type": "string",
+        "enum": [
+          "waiting",
+          "active",
+          "completed",
+          "skipped",
+          "expired"
+        ]
+      },
+      "SnapshotKind": {
+        "type": "string",
+        "enum": [
+          "initial",
+          "checkpoint",
+          "final"
+        ]
+      },
+      "Snapshot": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+          },
+          "sha256": {
+            "type": "string",
+            "description": "Hex SHA-256 of the zip."
+          },
+          "size": {
+            "type": "integer",
+            "description": "Bytes.",
+            "format": "int64"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SnapshotKind"
+          },
+          "createdAt": {
+            "type": "integer",
+            "description": "Unix epoch milliseconds",
+            "format": "int64",
+            "example": 1763164800000
+          }
+        },
+        "required": [
+          "id",
+          "sha256",
+          "size",
+          "kind",
+          "createdAt"
+        ]
+      },
+      "UpdateGameRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "example": "Moon Lord or Bust"
+          },
+          "worldName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "In-game world name.",
+            "example": "Shared Isle"
+          },
+          "playerName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32,
+            "description": "In-game character name.",
+            "example": "Hero"
+          },
+          "turnMinutes": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 1440
+          },
+          "orderMode": {
+            "$ref": "#/components/schemas/OrderMode"
+          },
+          "startWindowHours": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 336,
+            "description": "Strict order: auto-skip a turn not started within this many hours. null = never."
+          },
+          "discordWebhookUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "paused",
+              "finished"
+            ]
+          }
+        },
+        "description": "Only the fields sent are changed."
+      },
+      "Invite": {
+        "type": "object",
+        "properties": {
+          "inviteCode": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "inviteCode"
+        ]
+      },
+      "Joined": {
+        "type": "object",
+        "properties": {
+          "gameId": {
+            "type": "string",
+            "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+          }
+        },
+        "required": [
+          "gameId"
+        ]
+      },
+      "OrderRequest": {
+        "type": "object",
+        "properties": {
+          "userIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Every player exactly once, first player first."
+          }
+        },
+        "required": [
+          "userIds"
+        ]
+      },
+      "UpdatePlayerRequest": {
+        "type": "object",
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          }
+        }
+      },
+      "Uploaded": {
+        "type": "object",
+        "properties": {
+          "snapshot": {
+            "$ref": "#/components/schemas/Snapshot"
+          }
+        },
+        "required": [
+          "snapshot"
+        ]
+      },
+      "Started": {
+        "type": "object",
+        "properties": {
+          "turnId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+          }
+        },
+        "required": [
+          "turnId"
+        ]
+      },
+      "SkipRequest": {
+        "type": "object",
+        "properties": {
+          "keepProgress": {
+            "type": "boolean",
+            "default": true,
+            "description": "For an active turn with a checkpoint: keep that checkpoint as the next turn's starting save."
+          }
+        }
+      },
+      "RollbackRequest": {
+        "type": "object",
+        "properties": {
+          "snapshotId": {
+            "type": "string",
+            "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+          }
+        },
+        "required": [
+          "snapshotId"
+        ]
+      },
+      "ModGames": {
+        "type": "object",
+        "properties": {
+          "serverNow": {
+            "type": "integer",
+            "description": "Server clock, so the mod can correct for drift.",
+            "format": "int64",
+            "example": 1763164800000
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          },
+          "games": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModGame"
+            }
+          }
+        },
+        "required": [
+          "serverNow",
+          "user",
+          "games"
+        ]
+      },
+      "ModGame": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/GameStatus"
+          },
+          "worldName": {
+            "type": "string"
+          },
+          "playerName": {
+            "type": "string"
+          },
+          "isAdmin": {
+            "type": "boolean"
+          },
+          "needsInitialSave": {
+            "type": "boolean"
+          },
+          "hasInitialSave": {
+            "type": "boolean"
+          },
+          "canClaim": {
+            "type": "boolean",
+            "description": "The caller can start or resume the current turn."
+          },
+          "currentTurn": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Turn"
+              },
+              {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "worldName",
+          "playerName",
+          "isAdmin",
+          "needsInitialSave",
+          "hasInitialSave",
+          "canClaim",
+          "currentTurn"
+        ]
+      },
+      "Claim": {
+        "type": "object",
+        "properties": {
+          "gameId": {
+            "type": "string",
+            "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+          },
+          "turn": {
+            "$ref": "#/components/schemas/Turn"
+          },
+          "deadlineAt": {
+            "type": "integer",
+            "description": "Unix epoch milliseconds",
+            "format": "int64",
+            "example": 1763164800000
+          },
+          "graceMs": {
+            "type": "integer",
+            "description": "How long after the deadline uploads are still accepted.",
+            "format": "int64"
+          },
+          "serverNow": {
+            "type": "integer",
+            "description": "Unix epoch milliseconds",
+            "format": "int64",
+            "example": 1763164800000
+          },
+          "snapshot": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Snapshot"
+              },
+              {
+                "description": "Save to download: the turn's latest checkpoint when resuming, otherwise its starting save."
+              }
+            ]
+          },
+          "resumed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "gameId",
+          "turn",
+          "deadlineAt",
+          "graceMs",
+          "serverNow",
+          "snapshot",
+          "resumed"
+        ]
+      },
+      "Heartbeat": {
+        "type": "object",
+        "properties": {
+          "deadlineAt": {
+            "type": "integer",
+            "description": "Unix epoch milliseconds",
+            "format": "int64",
+            "example": 1763164800000
+          },
+          "serverNow": {
+            "type": "integer",
+            "description": "Unix epoch milliseconds",
+            "format": "int64",
+            "example": 1763164800000
+          }
+        },
+        "required": [
+          "deadlineAt",
+          "serverNow"
+        ]
+      }
+    },
+    "parameters": {}
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Health check",
+        "description": "For load balancers and the Docker healthcheck.",
+        "responses": {
+          "200": {
+            "description": "The server is up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/discord/start": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Start Discord sign-in",
+        "description": "Opened by the browser, not fetched. Sets a short-lived state cookie and redirects to Discord's consent screen.",
+        "responses": {
+          "302": {
+            "description": "Redirect to Discord's consent screen."
+          },
+          "500": {
+            "description": "Server misconfiguration or bug.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/discord/callback": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Finish Discord sign-in",
+        "description": "Where Discord sends the browser after consent (verified with the state cookie). Creates the user on first sign-in, then redirects to the site at `#/auth?token=…` with a new web session token.",
+        "responses": {
+          "302": {
+            "description": "Redirect to the site with a session token in the URL fragment."
+          },
+          "400": {
+            "description": "The request was invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server misconfiguration or bug.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "An upstream service (Discord) failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/dev-login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Sign in by name (development only)",
+        "description": "Returns 404 unless the server runs with `ENVIRONMENT=dev`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DevLoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A web session token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Token"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or you're not a member of this game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Sign out",
+        "description": "Revokes the token used to make this request.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Signed out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Get the signed-in user",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The signed-in user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/device/start": {
+      "post": {
+        "tags": [
+          "Mod linking"
+        ],
+        "summary": "Start linking the mod (step 1)",
+        "description": "The mod calls this and shows `userCode` to the player, then polls `/device/poll`.",
+        "responses": {
+          "200": {
+            "description": "A new link code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceStart"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/device/approve": {
+      "post": {
+        "tags": [
+          "Mod linking"
+        ],
+        "summary": "Approve a link code (step 2)",
+        "description": "The player enters the code shown in-game on the website.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceApproveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Approved. The mod picks up its token on its next poll.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or you're not a member of this game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/device/poll": {
+      "post": {
+        "tags": [
+          "Mod linking"
+        ],
+        "summary": "Poll for the mod token (step 3)",
+        "description": "The mod calls this every `intervalSeconds`; the `deviceCode` is the credential. Returns `pending` until the player approves, then hands out a long-lived mod token exactly once.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DevicePollRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pending, or approved with the token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DevicePoll"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "No longer available.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games": {
+      "get": {
+        "tags": [
+          "Games"
+        ],
+        "summary": "List the caller's games",
+        "description": "Every game the caller is in, including finished ones, with their role in each.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GameSummary"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Games"
+        ],
+        "summary": "Create a game",
+        "description": "The game starts in setup. The caller becomes its owner and first admin.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateGameRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedGame"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/{id}": {
+      "get": {
+        "tags": [
+          "Games"
+        ],
+        "summary": "Get a game",
+        "description": "Everything the game page shows. Non-members get 404.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or you're not a member of this game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Games"
+        ],
+        "summary": "Update settings or status",
+        "description": "Only the fields sent are changed. Status can go running ↔ paused, or to finished. Unpausing restarts the waiting player's start window. Changing `orderMode` re-picks who the waiting turn belongs to. World and character names can only change during setup.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGameRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Game"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or you're not a member of this game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with the game or turn's current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/{id}/invite": {
+      "post": {
+        "tags": [
+          "Players"
+        ],
+        "summary": "Reset the invite link",
+        "description": "Replaces the invite code. Old invite links stop working.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The new invite code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invite"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or you're not a member of this game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/join/{code}": {
+      "post": {
+        "tags": [
+          "Players"
+        ],
+        "summary": "Join a game",
+        "description": "Joins from an invite link, at the end of the turn order. Joining a game you're already in does nothing.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "K7PXM2QRTA"
+            },
+            "required": true,
+            "name": "code",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Joined.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Joined"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or you're not a member of this game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with the game or turn's current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/{id}/order": {
+      "put": {
+        "tags": [
+          "Players"
+        ],
+        "summary": "Set the turn order",
+        "description": "In strict order, the waiting turn is reassigned if the change affects who's next.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Order saved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or you're not a member of this game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/{id}/players/{userId}": {
+      "patch": {
+        "tags": [
+          "Players"
+        ],
+        "summary": "Update a player",
+        "description": "Lets a player sit out or rejoin, or changes their role. Players sitting out are skipped by the rotation. The owner is always an admin.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+            },
+            "required": true,
+            "name": "userId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePlayerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Player updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or you're not a member of this game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/{id}/snapshots/initial": {
+      "put": {
+        "tags": [
+          "Saves"
+        ],
+        "summary": "Upload the starting save",
+        "description": "Called by the mod. Uploads or replaces the starting save; only allowed during setup.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "A save bundle zip. Send its hex SHA-256 in the X-Content-SHA256 header to detect corruption.",
+          "content": {
+            "application/zip": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Uploaded"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or you're not a member of this game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with the game or turn's current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Upload is too large.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/{id}/start": {
+      "post": {
+        "tags": [
+          "Games"
+        ],
+        "summary": "Start the game",
+        "description": "Moves the game from setup to running and opens turn 1. Requires a starting save.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Started.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Started"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or you're not a member of this game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with the game or turn's current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/{id}/turns/current/skip": {
+      "post": {
+        "tags": [
+          "Turns"
+        ],
+        "summary": "Skip the current turn",
+        "description": "Ends the current turn early. An active turn with a checkpoint and `keepProgress` expires, and its last checkpoint becomes the next turn's starting save. Otherwise the turn is skipped and its progress discarded. Either way the next turn opens.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkipRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Turn ended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or you're not a member of this game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with the game or turn's current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/{id}/rollback": {
+      "post": {
+        "tags": [
+          "Saves"
+        ],
+        "summary": "Roll back to an earlier save",
+        "description": "Makes an earlier save the starting point for the next turn. Not allowed while a turn is being played.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RollbackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rolled back.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or you're not a member of this game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with the game or turn's current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/{id}/snapshots/{sid}/download": {
+      "get": {
+        "tags": [
+          "Saves"
+        ],
+        "summary": "Download a save",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+            },
+            "required": true,
+            "name": "sid",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The save bundle zip. Its hex SHA-256 is in the X-Content-SHA256 header.",
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or you're not a member of this game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mod/games": {
+      "get": {
+        "tags": [
+          "Turns"
+        ],
+        "summary": "Status for the in-game menu",
+        "description": "The caller's unfinished games, each with its current turn and whether the caller can start or resume it.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The caller's games.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModGames"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/turns/{id}/claim": {
+      "post": {
+        "tags": [
+          "Turns"
+        ],
+        "summary": "Start or resume a turn",
+        "description": "Starts a waiting turn, or resumes your own active one (after a crash, quit or PC switch). Requires a player in the rotation and a running game. Strict order: only the turn's owner can claim. Open order: anyone except whoever played last. Claiming starts the wall clock; resuming doesn't pause or reset it.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The turn, its deadline, and which save to download.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Claim"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or you're not a member of this game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with the game or turn's current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/turns/{id}/heartbeat": {
+      "post": {
+        "tags": [
+          "Turns"
+        ],
+        "summary": "Heartbeat while playing",
+        "description": "The mod calls this every minute while the turn's player is in the world, and uses the reply to resync its countdown. A 403/409 means the turn was skipped or expired; the mod then leaves the world without saving.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current deadline and server time.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Heartbeat"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or you're not a member of this game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with the game or turn's current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/turns/{id}/checkpoint": {
+      "put": {
+        "tags": [
+          "Saves"
+        ],
+        "summary": "Upload a checkpoint",
+        "description": "A mid-turn save. If the turn expires without a final upload, its latest checkpoint is kept. Only the turn's player, while active and until the deadline plus grace.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "A save bundle zip. Send its hex SHA-256 in the X-Content-SHA256 header to detect corruption.",
+          "content": {
+            "application/zip": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Uploaded"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or you're not a member of this game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with the game or turn's current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Upload is too large.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/turns/{id}/finish": {
+      "put": {
+        "tags": [
+          "Saves"
+        ],
+        "summary": "Upload the final save and end the turn",
+        "description": "The upload becomes the next turn's starting save and the next turn opens. Only the turn's player, while active and until the deadline plus grace.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "3f6c2a9e-8d1b-4c7e-9a52-0f4e1d2b7c88"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "A save bundle zip. Send its hex SHA-256 in the X-Content-SHA256 header to detect corruption.",
+          "content": {
+            "application/zip": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored; turn completed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Uploaded"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or you're not a member of this game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with the game or turn's current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Upload is too large.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {}
+}

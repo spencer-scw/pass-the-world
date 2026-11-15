@@ -1,0 +1,12 @@
+{
+  // Shared settings. tsconfig.json only points editors and `tsc -b` at the two projects below.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "composite": true
+  }
+}

@@ -1,0 +1,11 @@
+{
+  // The Node runtime: shared code plus src/node, the tests and the codegen scripts.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "tsBuildInfoFile": "./node_modules/.tmp/node.tsbuildinfo"
+  },
+  "include": ["src", "test", "scripts"],
+  "exclude": ["src/cloudflare"]
+}
