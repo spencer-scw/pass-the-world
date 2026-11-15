@@ -2,15 +2,20 @@ name = "pass-the-world"
 main = "src/cloudflare/worker.ts"
 compatibility_date = "2026-06-01"
 
+# Served on a custom domain in the Cloudflare zone, instead of <name>.<subdomain>.workers.dev.
+routes = [{ pattern = "passtheworld.skrewt.dev", custom_domain = true }]
+workers_dev = false
+
 # The website (built by `pnpm --filter site build`) is served as static assets.
 # Requests that don't match a file (i.e. /api/*) fall through to the worker.
 [assets]
 directory = "../site/dist"
 
 [vars]
-ENVIRONMENT = "dev" # "dev" enables /api/auth/dev-login. Use "production" when deployed.
-SITE_URL = "http://localhost:5173" # Deployed: https://pass-the-world.<you>.workers.dev (or your domain)
-API_URL = "http://localhost:8787/api" # Deployed: <SITE_URL>/api
+# Production values. For local development, .dev.vars overrides these (see .dev.vars.example).
+ENVIRONMENT = "production" # "dev" enables /api/auth/dev-login
+SITE_URL = "https://passtheworld.skrewt.dev"
+API_URL = "https://passtheworld.skrewt.dev/api"
 MAX_SNAPSHOT_MB = "64"
 
 # Secrets (`wrangler secret put NAME`, or .dev.vars locally):
@@ -20,7 +25,7 @@ MAX_SNAPSHOT_MB = "64"
 [[d1_databases]]
 binding = "DB"
 database_name = "pass-the-world"
-database_id = "00000000-0000-0000-0000-000000000000" # replace after `wrangler d1 create pass-the-world`
+database_id = "9acbd93c-96a7-4efd-bf45-1dc1fb703c46"
 migrations_dir = "migrations"
 
 [[r2_buckets]]

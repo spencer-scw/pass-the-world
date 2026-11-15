@@ -113,17 +113,24 @@ Create an app at <https://discord.com/developers/applications>. Under **OAuth2**
 
 ### Cloudflare
 
+`api/wrangler.toml` holds the production settings (the real deployment's domain and D1 database ID); locally,
+`api/.dev.vars` overrides them. For your own deployment:
+
 ```sh
 cd api
-npx wrangler d1 create pass-the-world        # paste the database_id into wrangler.toml
-npx wrangler r2 bucket create pass-the-world-saves
-# In wrangler.toml: ENVIRONMENT = "production",
-#   SITE_URL = "https://pass-the-world.<you>.workers.dev", API_URL = "<SITE_URL>/api"
+npx wrangler login
+npx wrangler d1 create pass-the-world        # put the database_id in wrangler.toml
+npx wrangler r2 bucket create pass-the-world-saves   # enable R2 in the dashboard first
+# In wrangler.toml: set SITE_URL and API_URL (<SITE_URL>/api), and either the custom-domain `routes`
+# entry (a domain in your Cloudflare zone) or `workers_dev = true` for <name>.<subdomain>.workers.dev.
 npx wrangler secret put DISCORD_CLIENT_ID
 npx wrangler secret put DISCORD_CLIENT_SECRET
 pnpm db:migrate:remote
-pnpm deploy                                   # builds the site, deploys the site and the API together
+pnpm run deploy                               # builds the site, deploys the site and the API together
 ```
+
+Add `<SITE_URL>/api/auth/discord/callback` as a redirect in the Discord app. To update a deployment, run
+`pnpm db:migrate:remote` (if there are new migrations) and `pnpm run deploy` again.
 
 ### Self-hosted (Docker)
 
