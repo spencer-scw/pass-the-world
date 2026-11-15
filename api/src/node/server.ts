@@ -5,6 +5,7 @@ import { mkdirSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { Hono } from 'hono';
 import { api, sweep } from '../app';
+import { invitePage } from '../invite-page';
 import { configFromVars, type Env } from '../platform';
 import { FsBlobStore } from './fs-blobs';
 import { SqliteStore } from './sqlite';
@@ -26,6 +27,7 @@ const env: Env = {
 
 const root = new Hono<{ Bindings: Env }>();
 root.route('/api', api);
+root.route('/', invitePage);
 // serveStatic resolves `root` against the working directory, so pass it relative.
 root.use('/*', serveStatic({ root: relative(process.cwd(), siteDir) || '.' }));
 

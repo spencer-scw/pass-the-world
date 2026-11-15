@@ -520,7 +520,7 @@ export interface paths {
         put?: never;
         /**
          * Create a game
-         * @description The game starts in setup. The caller becomes its owner and first admin.
+         * @description The game starts in setup. The caller becomes its owner and first admin. If a Discord webhook is set, the invite link is posted to it (also whenever the webhook changes).
          */
         post: {
             parameters: {
@@ -628,7 +628,7 @@ export interface paths {
         head?: never;
         /**
          * Update settings or status
-         * @description Only the fields sent are changed. Status can go running ↔ paused, or to finished. Unpausing restarts the waiting player's start window. Changing `orderMode` re-picks who the waiting turn belongs to. World and character names can only change during setup.
+         * @description Only the fields sent are changed. Status can go running ↔ paused, or to finished. Finishing closes the open turn (an active one keeps its last checkpoint) and posts to Discord. Unpausing restarts the waiting player's start window. Changing `orderMode` re-picks who the waiting turn belongs to. World and character names can only change during setup.
          */
         patch: {
             parameters: {
@@ -714,7 +714,7 @@ export interface paths {
         put?: never;
         /**
          * Reset the invite link
-         * @description Replaces the invite code. Old invite links stop working.
+         * @description Replaces the invite code. Old invite links stop working. Posts the new link to the game's webhook.
          */
         post: {
             parameters: {

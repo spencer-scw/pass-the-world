@@ -48,7 +48,8 @@ export function App() {
     <>
       <header className="topbar">
         <a href="#/" className="brand">
-          🌍 Pass the World
+          <img src={`${import.meta.env.BASE_URL}logo.png`} alt="" width="60" height="60" />
+          <span>Pass the World</span>
         </a>
         {me && (
           <div className="row">

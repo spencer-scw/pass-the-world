@@ -2,8 +2,9 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, openApiConfig } from '../src/app';
+import { invitePage } from '../src/invite-page';
 import { FsBlobStore } from '../src/node/fs-blobs';
 import { SqliteStore } from '../src/node/sqlite';
 import { configFromVars, type Env } from '../src/platform';
@@ -11,8 +12,18 @@ import { configFromVars, type Env } from '../src/platform';
 const savesDir = mkdtempSync(join(tmpdir(), 'ptw-test-'));
 afterAll(() => rmSync(savesDir, { recursive: true, force: true }));
 
+// Webhook posts are captured instead of sent.
+type Embed = { title: string; url: string; description: string; author: { name: string } };
+let posted: { url: string; content?: string; embed: Embed }[] = [];
+vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+  const body = JSON.parse(String(init.body));
+  posted.push({ url, content: body.content, embed: body.embeds[0] });
+  return new Response(null, { status: 204 });
+});
+
 let env: Env;
 beforeEach(() => {
+  posted = [];
   const db = new SqliteStore(':memory:');
   db.migrate(join(__dirname, '../migrations'));
   env = { db, blobs: new FsBlobStore(savesDir), config: configFromVars({ ENVIRONMENT: 'dev' }) };
@@ -67,6 +78,126 @@ describe('PATCH /games/:id', () => {
     expect(res.status).toBe(409);
     // Sending the unchanged name alongside other edits is fine.
     expect((await call('PATCH', `/games/${id}`, { token, body: { worldName: 'Other', name: 'X' } })).status).toBe(200);
+  });
+});
+
+describe('finishing a game', () => {
+  /** A running game whose turn #1 is in the given state. Returns the ids involved. */
+  async function gameWithTurn(status: 'waiting' | 'active', withCheckpoint = false) {
+    const token = await signIn('Alice');
+    const id = await createGame(token, { discordWebhookUrl: webhook });
+    const { userId } = (await call('GET', `/games/${id}`, { token })).body.me;
+    const now = Date.now();
+    const snap = async (sid: string, kind: string, turnId: string | null) =>
+      env.db.run(
+        `INSERT INTO snapshots (id, game_id, turn_id, kind, sha256, size, r2_key, uploaded_by, created_at)
+         VALUES (?, ?, ?, ?, 'x', 1, 'k', ?, ?)`,
+        sid,
+        id,
+        turnId,
+        kind,
+        userId,
+        now,
+      );
+    await snap('initial', 'initial', null);
+    await env.db.run(`UPDATE games SET status = 'running', head_snapshot_id = 'initial' WHERE id = ?`, id);
+    await env.db.run(
+      `INSERT INTO turns (id, game_id, seq, user_id, status, base_snapshot_id, available_at, claimed_at, deadline_at)
+       VALUES ('t1', ?, 1, ?, ?, 'initial', ?, ?, ?)`,
+      id,
+      userId,
+      status,
+      now,
+      status === 'active' ? now : null,
+      status === 'active' ? now + 3_600_000 : null,
+    );
+    if (withCheckpoint) await snap('cp', 'checkpoint', 't1');
+    return { token, id };
+  }
+
+  const finish = (token: string, id: string) => call('PATCH', `/games/${id}`, { token, body: { status: 'finished' } });
+
+  it('ends an active turn, keeping its last checkpoint, and opens no new one', async () => {
+    const { token, id } = await gameWithTurn('active', true);
+    expect((await finish(token, id)).status).toBe(200);
+
+    const detail = (await call('GET', `/games/${id}`, { token })).body;
+    expect(detail.currentTurnId).toBeNull();
+    expect(detail.turns).toEqual([expect.objectContaining({ seq: 1, status: 'expired' })]);
+    expect(await env.db.first(`SELECT head_snapshot_id AS head FROM games WHERE id = ?`, id)).toEqual({ head: 'cp' });
+    expect(posted.at(-1)?.embed).toMatchObject({ title: '🏁 Game over' });
+    expect(posted.at(-1)?.embed.description).toContain("during **Alice**'s turn #1");
+  });
+
+  it('closes a waiting turn', async () => {
+    const { token, id } = await gameWithTurn('waiting');
+    await finish(token, id);
+    const detail = (await call('GET', `/games/${id}`, { token })).body;
+    expect(detail.currentTurnId).toBeNull();
+    expect(detail.turns).toEqual([expect.objectContaining({ seq: 1, status: 'skipped' })]);
+    expect(posted.at(-1)?.embed.description).toBe('An admin finished the game. Thanks for playing!');
+  });
+});
+
+describe('invite announcements', () => {
+  const invites = () => posted.filter((p) => p.embed.url.includes('/join/'));
+
+  it('posts the invite link when a game is created with a webhook', async () => {
+    const token = await signIn('Alice');
+    const id = await createGame(token, { discordWebhookUrl: webhook });
+    const { inviteCode } = (await call('GET', `/games/${id}`, { token })).body.game;
+    expect(invites()).toHaveLength(1);
+    expect(invites()[0]).toMatchObject({
+      url: webhook,
+      embed: { title: '📨 Come play!', url: `http://localhost:5173/join/${inviteCode}`, author: { name: 'Test' } },
+    });
+  });
+
+  it('posts when the webhook is set or changed, but not on other edits', async () => {
+    const token = await signIn('Alice');
+    const id = await createGame(token);
+    expect(invites()).toHaveLength(0);
+
+    await call('PATCH', `/games/${id}`, { token, body: { discordWebhookUrl: webhook } });
+    await call('PATCH', `/games/${id}`, { token, body: { name: 'Renamed', discordWebhookUrl: webhook } });
+    await call('PATCH', `/games/${id}`, { token, body: { discordWebhookUrl: `${webhook}2` } });
+    expect(invites().map((p) => p.url)).toEqual([webhook, `${webhook}2`]);
+  });
+
+  it('posts the new link when the invite is reset', async () => {
+    const token = await signIn('Alice');
+    const id = await createGame(token, { discordWebhookUrl: webhook });
+    const { inviteCode } = (await call('POST', `/games/${id}/invite`, { token })).body;
+    expect(invites().at(-1)?.embed).toMatchObject({
+      title: '🔗 New invite link',
+      url: `http://localhost:5173/join/${inviteCode}`,
+    });
+  });
+});
+
+describe('GET /join/:code (invite preview page)', () => {
+  const page = async (path: string) => {
+    const res = await invitePage.request(path, {}, env);
+    return { status: res.status, html: await res.text() };
+  };
+
+  it('describes the game for link previews and sends browsers on to the app', async () => {
+    const token = await signIn('Alice');
+    const id = await createGame(token, { name: 'Moon <Lord> Run', turnMinutes: 45 });
+    const { inviteCode } = (await call('GET', `/games/${id}`, { token })).body.game;
+
+    const { status, html } = await page(`/join/${inviteCode}`);
+    expect(status).toBe(200);
+    expect(html).toContain('<meta property="og:title" content="Join Moon &lt;Lord&gt; Run on Pass the World">');
+    expect(html).toContain('1 player · 45-minute turns · fixed rotation.');
+    expect(html).toContain(`url=http://localhost:5173/#/join/${inviteCode}`);
+  });
+
+  it('still redirects for an unknown code, with a generic preview', async () => {
+    const { status, html } = await page('/join/nope');
+    expect(status).toBe(200);
+    expect(html).toContain('content="Pass the World invite"');
+    expect(html).toContain('url=http://localhost:5173/#/join/nope');
   });
 });
 

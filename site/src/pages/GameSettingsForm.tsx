@@ -95,6 +95,7 @@ export function GameSettingsForm(props: {
           placeholder="https://discord.com/api/webhooks/…"
           onChange={(e) => set('discordWebhookUrl', e.target.value || null)}
         />
+        <span className="small">Gets the invite link right away, then an announcement for every turn.</span>
       </label>
       <div className="row full">
         <button className="primary" type="submit" disabled={busy}>

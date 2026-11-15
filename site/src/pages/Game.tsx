@@ -42,6 +42,8 @@ export function GamePage({ id, me }: { id: string; me: Me }) {
   const { game } = data;
   const isAdmin = data.me.role === 'admin';
   const current = data.turns.find((t) => t.id === data.currentTurnId) ?? null;
+  // A real path rather than #/join/… so a pasted link previews the game (served by the API host, see invite-page.ts).
+  const inviteLink = game.inviteCode ? `${location.origin}${import.meta.env.BASE_URL}join/${game.inviteCode}` : null;
 
   const saveSettings = async (s: GameSettings) => {
     await api(`/games/${id}`, { method: 'PATCH', body: s });
@@ -86,7 +88,9 @@ export function GamePage({ id, me }: { id: string; me: Me }) {
               <button
                 className="danger"
                 onClick={() =>
-                  confirm('End this game for good?') && act(`/games/${id}`, 'PATCH', { status: 'finished' })
+                  confirm(
+                    `End this game for good?${current ? ` Turn #${current.seq} ends now; anything since its last checkpoint is lost.` : ''}`,
+                  ) && act(`/games/${id}`, 'PATCH', { status: 'finished' })
                 }
               >
                 Finish game
@@ -120,18 +124,20 @@ export function GamePage({ id, me }: { id: string; me: Me }) {
       <section className="card">
         <h2>Players</h2>
         <Players detail={data} isAdmin={isAdmin} act={act} />
-        {isAdmin && game.inviteCode && (
+        {isAdmin && inviteLink && (
           <div className="invite">
             <span className="muted">Invite link:</span>
-            <code>{`${location.origin}${location.pathname}#/join/${game.inviteCode}`}</code>
+            <code>{inviteLink}</code>
+            <button onClick={() => navigator.clipboard.writeText(inviteLink)}>Copy</button>
             <button
-              onClick={() =>
-                navigator.clipboard.writeText(`${location.origin}${location.pathname}#/join/${game.inviteCode}`)
-              }
+              onClick={() => {
+                const posts = game.discordWebhookUrl ? ' The new one is posted to Discord.' : '';
+                if (confirm(`Reset the invite link? The current link stops working.${posts}`))
+                  act(`/games/${id}/invite`);
+              }}
             >
-              Copy
+              Reset
             </button>
-            <button onClick={() => act(`/games/${id}/invite`)}>Reset</button>
           </div>
         )}
       </section>

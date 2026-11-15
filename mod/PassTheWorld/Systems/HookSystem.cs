@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Linq;
 using PassTheWorld.Common;
@@ -29,12 +30,25 @@ public class HookSystem : ModSystem
         }
     }
 
+    public override void Unload()
+    {
+        if (Main.dedServ) return;
+        // Vanilla's character select screen outlives this mod; leave nothing of ours attached to it.
+        try
+        {
+            PtwMenuButton.RemoveFromScreen();
+        }
+        catch (Exception e)
+        {
+            PassTheWorld.Instance?.Logger.Warn("[PassTheWorld] couldn't remove the menu button on unload", e);
+        }
+    }
+
     /// <summary>Adds a "Pass the World" button to the character select screen.</summary>
     private static void AddMenuButton(On_UICharacterSelect.orig_OnActivate orig, UICharacterSelect self)
     {
         orig(self);
-        if (!self.Children.Any(c => c is PtwMenuButton))
-            self.Append(new PtwMenuButton());
+        PtwMenuButton.AddTo(self);
     }
 
     /// <summary>Runs our upload logic after vanilla has finished writing the world and player to disk.</summary>

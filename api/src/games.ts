@@ -53,7 +53,8 @@ import {
   UploadedSchema,
 } from './schemas';
 import { snapshotInfo, storeSnapshot } from './storage';
-import { createNextTurn, expireTurn, reassignWaitingTurn, skipTurn, turnSummary } from './turns';
+import { announceInvite } from './notify';
+import { closeFinishedGame, createNextTurn, expireTurn, reassignWaitingTurn, skipTurn, turnSummary } from './turns';
 import type { Game } from './types';
 import { HttpError, newId, randomCode } from './util';
 
@@ -103,7 +104,9 @@ gameRoutes.openapi(
     path: '/games',
     tags: ['Games'],
     summary: 'Create a game',
-    description: 'The game starts in setup. The caller becomes its owner and first admin.',
+    description:
+      'The game starts in setup. The caller becomes its owner and first admin. If a Discord webhook is set, the ' +
+      'invite link is posted to it (also whenever the webhook changes).',
     ...signedIn,
     request: { body: jsonBody(CreateGameBody) },
     responses: { 201: jsonResponse(CreatedGameSchema, 'Created.'), ...errorsFor(400, 401) },
@@ -116,6 +119,7 @@ gameRoutes.openapi(
       { id, ownerId: c.get('user').id, inviteCode: randomCode(10), ...settings },
       Date.now(),
     );
+    if (settings.discordWebhookUrl) await announceInvite(c.env, await getGame(c.env, id));
     return c.json({ id }, 201);
   },
 );
@@ -168,7 +172,8 @@ gameRoutes.openapi(
     tags: ['Games'],
     summary: 'Update settings or status',
     description:
-      'Only the fields sent are changed. Status can go running ↔ paused, or to finished. Unpausing restarts the ' +
+      'Only the fields sent are changed. Status can go running ↔ paused, or to finished. Finishing closes the open ' +
+      'turn (an active one keeps its last checkpoint) and posts to Discord. Unpausing restarts the ' +
       "waiting player's start window. Changing `orderMode` re-picks who the waiting turn belongs to. World and " +
       'character names can only change during setup.',
     ...signedIn,
@@ -196,6 +201,7 @@ gameRoutes.openapi(
         throw new HttpError(409, errors.invalidStatusChange(game.status, body.status));
     }
     await updateGame(c.env, gameId, body);
+    if (body.status === 'finished') await closeFinishedGame(c.env, gameId, Date.now());
 
     if (body.status === 'running') {
       // Unpausing restarts the start window for whoever is up.
@@ -206,7 +212,11 @@ gameRoutes.openapi(
       if (body.orderMode === 'open') await clearWaitingTurnOwner(c.env, gameId);
       await reassignWaitingTurn(c.env, await getGame(c.env, gameId));
     }
-    return c.json(gameView(await getGame(c.env, gameId), true), 200);
+    const updated = await getGame(c.env, gameId);
+    // A new webhook channel hasn't seen the invite yet.
+    if (body.discordWebhookUrl && body.discordWebhookUrl !== game.discord_webhook_url)
+      await announceInvite(c.env, updated);
+    return c.json(gameView(updated, true), 200);
   },
 );
 
@@ -216,7 +226,7 @@ gameRoutes.openapi(
     path: '/games/{id}/invite',
     tags: ['Players'],
     summary: 'Reset the invite link',
-    description: 'Replaces the invite code. Old invite links stop working.',
+    description: "Replaces the invite code. Old invite links stop working. Posts the new link to the game's webhook.",
     ...signedIn,
     request: { params: GameIdParam },
     responses: { 200: jsonResponse(InviteSchema, 'The new invite code.'), ...errorsFor(401, 403, 404) },
@@ -226,6 +236,7 @@ gameRoutes.openapi(
     await requireAdmin(c.env, gameId, c.get('user').id);
     const code = randomCode(10);
     await setInviteCode(c.env, gameId, code);
+    await announceInvite(c.env, await getGame(c.env, gameId), true);
     return c.json({ inviteCode: code }, 200);
   },
 );

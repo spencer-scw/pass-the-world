@@ -1,3 +1,4 @@
+#nullable enable
 using Microsoft.Xna.Framework;
 using PassTheWorld.Common;
 using PassTheWorld.Systems;

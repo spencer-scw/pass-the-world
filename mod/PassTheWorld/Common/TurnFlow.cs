@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.IO;
 using System.Linq;
@@ -18,26 +19,41 @@ namespace PassTheWorld.Common;
 /// </summary>
 public static class TurnFlow
 {
-    private static volatile string _status = "";
+    private static volatile Func<string> _status = () => "";
     private static int _version;
     private static int _busy;
     private static int _checkpointRunning;
 
-    /// <summary>Message shown at the bottom of the Pass the World menu.</summary>
+    /// <summary>Message shown at the bottom of the Pass the World menu. The menu reads it every frame.</summary>
     public static string Status
     {
-        get => _status;
+        get => _status();
         private set
         {
-            _status = value;
+            var text = value;
+            _status = () => text;
             Interlocked.Increment(ref _version);
         }
+    }
+
+    /// <summary>A status that's re-evaluated every frame, for messages with a countdown in them.</summary>
+    private static void SetLiveStatus(Func<string> status)
+    {
+        _status = status;
+        Interlocked.Increment(ref _version);
     }
 
     /// <summary>Bumped whenever something the menu shows changes, so it knows to refresh.</summary>
     public static int Version => Volatile.Read(ref _version);
 
     public static bool Busy => Volatile.Read(ref _busy) == 1;
+
+    private static int _gamesVersion;
+
+    /// <summary>Bumped whenever the server's view of our games has likely changed, so the menu re-fetches.</summary>
+    public static int GamesVersion => Volatile.Read(ref _gamesVersion);
+
+    private static void GamesChanged() => Interlocked.Increment(ref _gamesVersion);
 
     /// <summary>True while the player is inside the world for the turn they hold.</summary>
     public static volatile bool InTurnWorld;
@@ -93,6 +109,7 @@ public static class TurnFlow
             {
                 TokenStore.Save(poll.Token, poll.User?.DisplayName);
                 Status = Messages.Status.Linked(poll.User?.DisplayName);
+                GamesChanged();
                 return;
             }
         }
@@ -103,6 +120,7 @@ public static class TurnFlow
     {
         TokenStore.Clear();
         Status = Messages.Status.Unlinked;
+        GamesChanged();
     }
 
     // ------------------------------------------------------------------ setup
@@ -145,6 +163,7 @@ public static class TurnFlow
                 Log(e);
                 Status = Messages.Status.StartingSaveNotMoved(zip.Length, e.Message);
             }
+            GamesChanged();
             Main.QueueMainThreadAction(() =>
             {
                 Main.LoadPlayers();
@@ -160,6 +179,7 @@ public static class TurnFlow
         var turn = game.CurrentTurn ?? throw new InvalidOperationException(Messages.Errors.NoTurnAvailable);
         Status = Messages.Status.Claiming;
         var claim = await PtwApi.Claim(turn.Id);
+        GamesChanged();
 
         // We were playing this turn on this machine: the stored save is at least as new as the last checkpoint.
         var local = LocalTurnState.Load();
@@ -226,9 +246,9 @@ public static class TurnFlow
             }
             catch (PtwApiException e) when (e.Status is 403 or 409)
             {
-                // An admin skipped or expired the turn. Leave without uploading anything.
-                Chat(Messages.Chat.TurnEndedByServer(e.Message), Color.OrangeRed);
-                Main.QueueMainThreadAction(Abandon);
+                // An admin skipped or expired the turn. Leave without uploading anything. (Chat is cleared when we
+                // leave the world, so the explanation goes in the menu's status line.)
+                Main.QueueMainThreadAction(() => Abandon(e.Message));
             }
             catch (Exception e)
             {
@@ -321,13 +341,14 @@ public static class TurnFlow
         else
         {
             // Quit mid-turn: checkpoint so a crash or PC switch doesn't lose progress. The clock keeps running.
-            Status = Messages.Status.LeftMidTurn(TurnSession.Remaining);
+            SetLiveStatus(() => Messages.Status.LeftMidTurn(TurnSession.Remaining));
             Task.Run(async () =>
             {
                 try
                 {
                     await PtwApi.UploadCheckpoint(turnId, zip);
-                    Status = Messages.Status.MidTurnCheckpointSaved(TurnSession.Remaining);
+                    SetLiveStatus(() => Messages.Status.MidTurnCheckpointSaved(TurnSession.Remaining));
+                    GamesChanged();
                 }
                 catch (Exception e)
                 {
@@ -336,7 +357,7 @@ public static class TurnFlow
                 }
             });
         }
-        Main.QueueMainThreadAction(PtwMenuState.Open);
+        Main.QueueMainThreadAction(ReturnToMenu);
     }
 
     public static void RetryFinal() => RunExclusive(Messages.Status.UploadFailed, SubmitFinal);
@@ -378,6 +399,7 @@ public static class TurnFlow
         }
         PendingFinal = true;
         Status = Messages.Status.FinalGaveUp;
+        GamesChanged();
     }
 
     private static void EndSession()
@@ -385,15 +407,30 @@ public static class TurnFlow
         _finalBundle = null;
         LocalTurnState.Clear();
         TurnSession.Clear();
+        GamesChanged();
     }
 
     /// <summary>Main thread: the server ended our turn. Leave without saving so nothing diverges.</summary>
-    private static void Abandon()
+    private static void Abandon(string reason)
     {
         InTurnWorld = false;
         if (!Main.gameMenu) WorldGen.JustQuit();
         // That turn's progress is void: drop the staged copy rather than copying it back into storage.
         SaveStore.DiscardStaged();
         EndSession();
+        Status = Messages.Status.TurnEndedByServer(reason);
+        ReturnToMenu();
+    }
+
+    /// <summary>
+    /// Main thread: after staged files are removed, reload the game's player/world lists (they still point at the
+    /// deleted files, and vanilla crashes drawing a list entry whose file is gone), then show our menu rather than
+    /// wherever vanilla left us (JustQuit lands on world select).
+    /// </summary>
+    private static void ReturnToMenu()
+    {
+        Main.LoadPlayers();
+        Main.LoadWorlds();
+        PtwMenuState.Open();
     }
 }

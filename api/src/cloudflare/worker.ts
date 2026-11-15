@@ -1,7 +1,8 @@
 // Cloudflare Workers host: D1 for the database, R2 for save bundles.
-// The website is served by Workers Static Assets (see [assets] in wrangler.toml); only /api/* reaches this code.
+// The website is served by Workers Static Assets (see [assets] in wrangler.toml); only /api/* and /join/* reach this code.
 import { Hono } from 'hono';
 import { api, sweep } from '../app';
+import { invitePage } from '../invite-page';
 import { configFromVars, type BlobStore, type Database, type Env, type SqlValue } from '../platform';
 
 interface Bindings {
@@ -55,7 +56,7 @@ const services = (b: Bindings): Env => ({
   config: configFromVars(b as unknown as Record<string, string | undefined>),
 });
 
-const root = new Hono<{ Bindings: Env }>().route('/api', api);
+const root = new Hono<{ Bindings: Env }>().route('/api', api).route('/', invitePage);
 
 export default {
   fetch: (req, env, ctx) => root.fetch(req, services(env), ctx),

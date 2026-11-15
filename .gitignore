@@ -11,3 +11,6 @@ mod/PassTheWorld/Properties/launchSettings.json
 *.local
 data/
 .env
+
+# Machine-specific; link it from your tModLoader ModSources folder (see README).
+mod/tModLoader.targets

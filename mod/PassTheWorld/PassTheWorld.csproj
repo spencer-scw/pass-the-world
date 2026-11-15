@@ -1,10 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- tModLoader generates ModSources/tModLoader.targets the first time you open "Develop Mods". -->
-  <Import Project="..\tModLoader.targets" />
+  <!--
+    tModLoader generates ModSources/tModLoader.targets the first time you open "Develop Mods".
+    MSBuild resolves symlinks, so when this folder is symlinked into ModSources, "..\" is the repo's mod/ folder:
+    link that file there too (mod/tModLoader.targets is gitignored). See the README.
+  -->
+  <Import Project="..\tModLoader.targets" Condition="Exists('..\tModLoader.targets')" />
   <PropertyGroup>
     <AssemblyName>PassTheWorld</AssemblyName>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
+    <!-- Placeholder so the SDK gets far enough to show the error below instead of a confusing NETSDK1013. -->
+    <TargetFramework Condition="!Exists('..\tModLoader.targets')">net8.0</TargetFramework>
   </PropertyGroup>
+  <Target Name="RequireTModLoaderTargets" BeforeTargets="ResolveReferences;Build" Condition="!Exists('..\tModLoader.targets')">
+    <Error Text="Missing mod/tModLoader.targets. Symlink it from your tModLoader ModSources folder, e.g. on Linux: ln -s ~/.local/share/Terraria/tModLoader/ModSources/tModLoader.targets mod/tModLoader.targets" />
+  </Target>
 </Project>

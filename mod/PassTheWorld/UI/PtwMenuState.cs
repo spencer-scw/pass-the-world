@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Threading.Tasks;
 using Microsoft.Xna.Framework;
@@ -26,7 +27,9 @@ public class PtwMenuState : UIState
     private volatile string? _fetchError;
     private ModGamesDto? _games;
     private bool _loading;
-    private int _seenVersion = -1;
+    private bool _refreshQueued;
+    private int _seenStatusVersion = -1;
+    private int _seenGamesVersion = -1;
     private DateTime _nextAutoRefresh;
 
     public static void Open()
@@ -51,7 +54,10 @@ public class PtwMenuState : UIState
         panel.Height.Set(-110f, 1f);
         root.Append(panel);
 
-        _account = new UIText("");
+        // UIText centers within its own box, which doesn't resize when the text changes. Pin it full-width and
+        // left-aligned so "Not linked to an account" can't spill past the panel edge.
+        _account = new UIText("") { TextOriginX = 0f };
+        _account.Width.Set(0f, 1f);
         panel.Append(_account);
 
         _list = new UIList { ListPadding = 8f };
@@ -85,9 +91,15 @@ public class PtwMenuState : UIState
 
     private void Refresh()
     {
-        if (TokenStore.Token == null || _loading)
+        if (TokenStore.Token == null)
         {
             Rebuild();
+            return;
+        }
+        if (_loading)
+        {
+            // A fetch is already running and may predate the change we need to see: fetch again when it lands.
+            _refreshQueued = true;
             return;
         }
         _loading = true;
@@ -120,26 +132,37 @@ public class PtwMenuState : UIState
             _games = _fetched;
             _fetched = null;
             Rebuild();
+            if (_refreshQueued && !_loading)
+            {
+                _refreshQueued = false;
+                Refresh();
+            }
         }
-        else if (_seenVersion != TurnFlow.Version)
+
+        if (_seenGamesVersion != TurnFlow.GamesVersion)
         {
-            // An operation started/finished; a finished one may have changed server state.
-            var wasBusy = _seenVersion != -1 && !TurnFlow.Busy;
-            _seenVersion = TurnFlow.Version;
-            if (wasBusy) Refresh();
-            else Rebuild();
+            // Something changed on the server (claimed, submitted, uploaded, linked): always re-fetch.
+            _seenGamesVersion = TurnFlow.GamesVersion;
+            Refresh();
+        }
+        else if (_seenStatusVersion != TurnFlow.Version)
+        {
+            // Only the status line or busy state changed: redraw.
+            Rebuild();
         }
         else if (DateTime.UtcNow >= _nextAutoRefresh && !TurnFlow.Busy)
         {
             Refresh();
         }
 
-        _status.SetText(_fetchError != null ? Messages.Status.ServerUnreachable(_fetchError) : TurnFlow.Status);
+        // Re-read every frame: some statuses count down.
+        var status = _fetchError != null ? Messages.Status.ServerUnreachable(_fetchError) : TurnFlow.Status;
+        if (status != _status.Text) _status.SetText(status);
     }
 
     private void Rebuild()
     {
-        _seenVersion = TurnFlow.Version;
+        _seenStatusVersion = TurnFlow.Version;
         _list.Clear();
         _buttons.RemoveAllChildren();
 
@@ -199,13 +222,24 @@ public class PtwMenuState : UIState
             if (g.IsAdmin)
                 action = new PtwButton(Messages.Menu.UploadStartingSave(g.HasInitialSave), () => Guard(() => TurnFlow.UploadInitialSave(g)), 220f);
         }
+        else if (TurnSession.Ending && TurnSession.GameId == g.Id)
+        {
+            // Our final upload is still in flight (or waiting on "Retry upload"); the server hasn't moved on yet.
+            line = Messages.Menu.SubmittingTurn(TurnSession.TurnSeq);
+        }
         else if (g.Status == GameStatus.Paused) line = Messages.Menu.Paused;
         else if (t == null) line = Messages.Menu.NoOpenTurn;
         else if (t.Status == TurnStatus.Active)
         {
-            var left = t.DeadlineAt is { } d ? DateTimeOffset.FromUnixTimeMilliseconds(d) - DateTimeOffset.UtcNow : TimeSpan.Zero;
-            line = t.UserId == myId ? Messages.Menu.YouAreMidTurn(t.Seq, left) : Messages.Menu.SomeoneIsPlaying(t.UserName, t.Seq, left);
+            // Ticks every frame, so the time left stays current between refreshes.
+            var deadline = t.DeadlineAt is { } d ? DateTimeOffset.FromUnixTimeMilliseconds(d) : DateTimeOffset.UtcNow;
+            var mine = t.UserId == myId;
             if (g.CanClaim) action = new PtwButton(Messages.Menu.ResumeTurn, () => Guard(() => TurnFlow.StartOrResume(g)), 180f);
+            return Row(g.Name, () =>
+            {
+                var left = deadline - DateTimeOffset.UtcNow;
+                return mine ? Messages.Menu.YouAreMidTurn(t.Seq, left) : Messages.Menu.SomeoneIsPlaying(t.UserName, t.Seq, left);
+            }, action);
         }
         else if (g.CanClaim)
         {
@@ -222,17 +256,24 @@ public class PtwMenuState : UIState
         if (!TurnFlow.Busy) action();
     }
 
-    private static UIPanel Row(string title, string line, UIElement? action)
+    private static UIPanel Row(string title, string line, UIElement? action) => Row(title, () => line, action);
+
+    private static UIPanel Row(string title, Func<string> line, UIElement? action)
     {
         var row = new UIPanel();
         row.Width.Set(0f, 1f);
-        row.Height.Set(72f, 0f);
+        row.Height.Set(96f, 0f);
 
-        var titleText = new UIText(title, 1f);
+        // Text stops short of the action button and wraps onto a second line instead of running underneath it.
+        var textWidth = action != null ? -(action.Width.Pixels + 16f) : 0f;
+
+        var titleText = new UIText(title, 1f) { TextOriginX = 0f };
+        titleText.Width.Set(textWidth, 1f);
         row.Append(titleText);
 
-        var lineText = new UIText(line, 0.85f) { TextColor = new Color(200, 200, 200) };
+        var lineText = new LiveText(line, 0.85f) { TextColor = new Color(200, 200, 200), IsWrapped = true, TextOriginX = 0f };
         lineText.Top.Set(28f, 0f);
+        lineText.Width.Set(textWidth, 1f);
         row.Append(lineText);
 
         if (action != null)
@@ -250,5 +291,16 @@ public class PtwMenuState : UIState
         t.Width.Set(0f, 1f);
         t.Height.Set(40f, 0f);
         return t;
+    }
+
+    /// <summary>Text that re-reads its content every frame (only re-lays out when it actually changes).</summary>
+    private sealed class LiveText(Func<string> text, float textScale) : UIText(text(), textScale)
+    {
+        public override void Update(GameTime gameTime)
+        {
+            base.Update(gameTime);
+            var current = text();
+            if (current != Text) SetText(current);
+        }
     }
 }

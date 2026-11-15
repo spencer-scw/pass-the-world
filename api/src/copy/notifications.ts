@@ -1,8 +1,8 @@
-// Discord messages posted to a game's webhook. Builders take already-resolved mentions
+// Discord messages posted to a game's webhook, as cards (embeds). Builders take already-resolved mentions
 // (see notify.ts `mention`) so they stay pure and easy to tweak.
 
-/** Discord timestamp that renders in each reader's local time ('t' = time, 'f' = date + time). */
-const discordTime = (ms: number, style: 't' | 'f' = 't') => `<t:${Math.floor(ms / 1000)}:${style}>`;
+/** Discord timestamp that renders in each reader's local time ('t' = time, 'f' = date + time, 'R' = "in 2 hours"). */
+const discordTime = (ms: number, style: 't' | 'f' | 'R' = 't') => `<t:${Math.floor(ms / 1000)}:${style}>`;
 
 /** Why a turn expired (ended without a final upload, keeping its last checkpoint). */
 export type ExpireReason = 'timeout' | 'admin';
@@ -10,39 +10,130 @@ export type ExpireReason = 'timeout' | 'admin';
 /** Why a turn was skipped (ended with its progress discarded). */
 export type SkipReason = { kind: 'admin' } | { kind: 'no-show'; hours: number };
 
+/**
+ * One webhook post. notify.ts turns it into an embed with the game's name, the logo and a link to the game.
+ * Mentions inside an embed are displayed but don't notify anyone, so `ping` (plain text above the card) is
+ * where a player who needs to act gets pinged.
+ */
+export interface Card {
+  ping?: string;
+  title: string;
+  description: string;
+  color: number;
+  fields?: { name: string; value: string; inline?: boolean }[];
+  /** Where the title links to. Defaults to the game page. */
+  url?: string;
+}
+
+/** Card colours, matching the website's theme. */
+const color = {
+  go: 0x8fd64a,
+  info: 0x4b60ad,
+  gold: 0xf2d35b,
+  danger: 0xff8270,
+};
+
 /** How a user is referred to: a Discord ping when we know their ID, otherwise their bolded name. */
 export function formatMention(user: { display_name: string; discord_id: string | null } | null): string {
   if (!user) return '**someone**';
   return user.discord_id ? `<@${user.discord_id}>` : `**${user.display_name}**`;
 }
 
-/** Every message is prefixed with the game's name so one channel can host several games. */
-export const withGameName = (gameName: string, content: string) => `**${gameName}** · ${content}`;
-
 export const notifications = {
+  /** The invite link, posted when a game gets a webhook and whenever the link is reset. */
+  invite: (p: { turnMinutes: number; orderMode: 'strict' | 'open'; link: string; reset: boolean }): Card => ({
+    title: p.reset ? '🔗 New invite link' : '📨 Come play!',
+    description: p.reset
+      ? `The invite link was reset; old links no longer work.\n**[Join the game](${p.link})**`
+      : `Take turns playing one shared Terraria world.\n**[Join the game](${p.link})**`,
+    color: color.gold,
+    url: p.link,
+    fields: [
+      { name: 'Turns', value: `${p.turnMinutes} minutes`, inline: true },
+      { name: 'Order', value: p.orderMode === 'strict' ? 'Fixed rotation' : 'Anyone, any order', inline: true },
+    ],
+  }),
+
   /** A new turn opened. `player` is null in open order. `startBy` is set when a no-show will be auto-skipped. */
-  turnAvailable: (p: { seq: number; player: string | null; startBy: number | null; link: string }) => {
-    const who = p.player ? `it's ${p.player}'s turn` : 'the world is up for grabs';
-    const deadline = p.startBy != null ? ` Start by ${discordTime(p.startBy, 'f')} or it gets skipped.` : '';
-    return `🌍 Turn #${p.seq}: ${who}!${deadline} ${p.link}`;
-  },
+  turnAvailable: (p: { seq: number; player: string | null; startBy: number | null }): Card => ({
+    ping: p.player ? `${p.player}, you're up!` : undefined,
+    title: `🌍 Turn #${p.seq} is ready`,
+    description: p.player
+      ? `It's ${p.player}'s turn.`
+      : 'The world is up for grabs: anyone except the last player can take it.',
+    color: color.go,
+    fields:
+      p.startBy != null
+        ? [
+            {
+              name: 'Start by',
+              value: `${discordTime(p.startBy, 'f')} (${discordTime(p.startBy, 'R')}) or it gets skipped`,
+            },
+          ]
+        : undefined,
+  }),
 
-  turnReassigned: (p: { player: string; link: string }) =>
-    `🔀 Turn order changed, it's now ${p.player}'s turn! ${p.link}`,
+  turnReassigned: (p: { player: string }): Card => ({
+    ping: `${p.player}, you're up!`,
+    title: '🔀 Turn order changed',
+    description: `It's now ${p.player}'s turn.`,
+    color: color.go,
+  }),
 
-  turnStarted: (p: { seq: number; player: string; deadlineAt: number }) =>
-    `▶️ ${p.player} started turn #${p.seq} (ends ${discordTime(p.deadlineAt)}).`,
+  turnStarted: (p: { seq: number; player: string; deadlineAt: number }): Card => ({
+    title: `▶️ Turn #${p.seq} started`,
+    description: `${p.player} is playing.`,
+    color: color.info,
+    fields: [{ name: 'Ends', value: `${discordTime(p.deadlineAt)} (${discordTime(p.deadlineAt, 'R')})` }],
+  }),
 
-  turnFinished: (p: { seq: number; player: string }) => `✅ ${p.player} finished turn #${p.seq}.`,
+  turnFinished: (p: { seq: number; player: string }): Card => ({
+    title: `✅ Turn #${p.seq} finished`,
+    description: `${p.player} passed the world on.`,
+    color: color.go,
+  }),
 
-  turnExpired: (p: { seq: number; player: string; reason: ExpireReason; keptCheckpoint: boolean }) => {
-    const what = p.reason === 'timeout' ? 'ran out of time without a final upload' : 'was ended early by an admin';
-    const progress = p.keptCheckpoint ? 'progress up to the last checkpoint was kept' : 'no progress was saved';
-    return `⌛ ${p.player}'s turn #${p.seq} ${what}; ${progress}.`;
-  },
+  turnExpired: (p: { seq: number; player: string; reason: ExpireReason; keptCheckpoint: boolean }): Card => ({
+    title: `⌛ Turn #${p.seq} ended early`,
+    description:
+      p.reason === 'timeout'
+        ? `${p.player}'s turn ran out of time without a final upload.`
+        : `${p.player}'s turn was ended early by an admin.`,
+    color: color.gold,
+    fields: [
+      {
+        name: 'Progress',
+        value: p.keptCheckpoint
+          ? 'Kept up to the last checkpoint'
+          : 'None saved; the world is as it was before the turn',
+      },
+    ],
+  }),
 
-  turnSkipped: (p: { seq: number; player: string; reason: SkipReason }) =>
-    p.reason.kind === 'admin'
-      ? `⏭️ Turn #${p.seq} (${p.player}) was skipped by an admin.`
-      : `⏭️ Turn #${p.seq} (${p.player}) was skipped: not started within ${p.reason.hours}h.`,
+  /** An admin finished the game. `interrupted` is the turn that was in progress, if any. */
+  gameFinished: (p: { interrupted: { seq: number; player: string; keptCheckpoint: boolean } | null }): Card => ({
+    title: '🏁 Game over',
+    description: p.interrupted
+      ? `An admin finished the game during ${p.interrupted.player}'s turn #${p.interrupted.seq}. Thanks for playing!`
+      : 'An admin finished the game. Thanks for playing!',
+    color: color.gold,
+    fields: [
+      {
+        name: 'Final world',
+        value:
+          p.interrupted && !p.interrupted.keptCheckpoint
+            ? `As it was before turn #${p.interrupted.seq}; download it from the game page`
+            : 'Download it from the game page',
+      },
+    ],
+  }),
+
+  turnSkipped: (p: { seq: number; player: string; reason: SkipReason }): Card => ({
+    title: `⏭️ Turn #${p.seq} skipped`,
+    description:
+      p.reason.kind === 'admin'
+        ? `${p.player}'s turn was skipped by an admin.`
+        : `${p.player} didn't start within ${p.reason.hours}h.`,
+    color: color.danger,
+  }),
 };
