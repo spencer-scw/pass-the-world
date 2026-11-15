@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 
 namespace PassTheWorld.Common;
@@ -15,6 +16,16 @@ public static class Messages
         return t.TotalHours >= 1 ? $"{(int)t.TotalHours}h {t.Minutes:D2}m" : $"{t.Minutes}:{t.Seconds:D2}";
     }
 
+    /// <summary>A turn length in words: "10 minutes", "1 hour", "1 hour 30 minutes".</summary>
+    public static string Length(TimeSpan t)
+    {
+        var minutes = (int)Math.Round(t.TotalMinutes);
+        string Unit(int n, string unit) => $"{n} {unit}{(n == 1 ? "" : "s")}";
+        if (minutes < 60) return Unit(minutes, "minute");
+        var hours = Unit(minutes / 60, "hour");
+        return minutes % 60 == 0 ? hours : $"{hours} {Unit(minutes % 60, "minute")}";
+    }
+
     private static string Kb(long bytes) => $"{bytes / 1024} KB";
 
     /// <summary>Lines posted to in-game chat while playing.</summary>
@@ -24,8 +35,11 @@ public static class Messages
 
         public static string Format(string text) => $"{Prefix} {text}";
 
-        public static string TurnStarted(int seq, TimeSpan remaining) =>
-            Format($"Turn #{seq} started, {Duration(remaining)} on the clock. Have fun!");
+        public static string TurnStarted(int seq, TimeSpan length) =>
+            Format($"Turn #{seq} started: you have {Length(length)}. Have fun!");
+
+        public static string TurnResumed(int seq, TimeSpan remaining, TimeSpan length) =>
+            Format($"Turn #{seq} resumed: {Duration(remaining)} left of your {Length(length)}.");
 
         public static string MinutesLeft(int minutes) =>
             Format($"{minutes} minute{(minutes == 1 ? "" : "s")} left in your turn!");
@@ -36,8 +50,6 @@ public static class Messages
 
         public static string CheckpointFailed(string error) =>
             Format($"Checkpoint upload failed ({error}). Will retry next interval.");
-
-        public static string TurnEndedByServer(string reason) => Format($"Your turn was ended by the server: {reason}");
 
         public static string Blocked(GateReason reason) => Format($"{reason switch
         {
@@ -93,11 +105,16 @@ public static class Messages
         // Ending a turn
         public const string UploadingFinal = "Uploading your save...";
 
+        // These two are shown live (re-evaluated every frame), so the time keeps counting down.
         public static string LeftMidTurn(TimeSpan remaining) =>
-            $"You left mid-turn, {Duration(remaining)} left on the clock. Saving a checkpoint...";
+            remaining > TimeSpan.Zero
+                ? $"You left mid-turn, {Duration(remaining)} left on the clock. Saving a checkpoint..."
+                : "You left mid-turn and your time is up. Saving a checkpoint...";
 
         public static string MidTurnCheckpointSaved(TimeSpan remaining) =>
-            $"Checkpoint saved. {Duration(remaining)} left on your turn; resume any time before it ends.";
+            remaining > TimeSpan.Zero
+                ? $"Checkpoint saved. {Duration(remaining)} left on your turn; resume any time before it ends."
+                : "Checkpoint saved, and your time is up. Your last checkpoint will be passed on.";
 
         public static string CheckpointFailed(string error) => $"Checkpoint upload failed: {error}";
 
@@ -107,6 +124,9 @@ public static class Messages
         public const string FinalGaveUp = "Couldn't upload your final save. Use \"Retry upload\" before the grace period ends.";
 
         public static string ServerUnreachable(string error) => $"Couldn't reach the server: {error}";
+
+        public static string TurnEndedByServer(string reason) =>
+            $"Your turn was ended from the website ({reason}). Anything since your last checkpoint wasn't kept.";
     }
 
     /// <summary>Text in the Pass the World menu itself.</summary>
@@ -143,12 +163,12 @@ public static class Messages
         public const string Paused = "Paused by the host.";
         public const string NoOpenTurn = "No turn is open right now.";
 
-        public static string TimeLeft(TimeSpan left) =>
-            left > TimeSpan.Zero ? $"{(int)left.TotalMinutes} min left" : "finishing up";
+        public static string TimeLeft(TimeSpan left) => left > TimeSpan.Zero ? $"{Duration(left)} left" : "finishing up";
 
         public static string YouAreMidTurn(int seq, TimeSpan left) => $"You're mid-turn #{seq} ({TimeLeft(left)}).";
         public static string SomeoneIsPlaying(string? name, int seq, TimeSpan left) => $"{name} is playing turn #{seq} ({TimeLeft(left)}).";
         public static string YourTurn(int seq) => $"Turn #{seq}: it's your turn!";
+        public static string SubmittingTurn(int seq) => $"Submitting turn #{seq}...";
         public static string WaitingOn(int seq, string name) => $"Turn #{seq}: waiting on {name}.";
         public static string UpForGrabs(int seq) => $"Turn #{seq}: up for grabs (you went last).";
     }

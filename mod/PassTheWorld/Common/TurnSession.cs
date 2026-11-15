@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using PassTheWorld.Common.Api;
 
@@ -9,6 +10,12 @@ public static class TurnSession
     public static string? GameId { get; private set; }
     public static string? TurnId { get; private set; }
     public static int TurnSeq { get; private set; }
+
+    /// <summary>The turn's full length (claim to deadline), regardless of how much is left.</summary>
+    public static TimeSpan TurnLength { get; private set; }
+
+    /// <summary>True when this session picked up a turn that was already in progress.</summary>
+    public static bool Resumed { get; private set; }
 
     /// <summary>The game's save, copied into the normal folders for this turn.</summary>
     public static StagedSave? Staged { get; private set; }
@@ -32,6 +39,10 @@ public static class TurnSession
         GameId = claim.GameId;
         TurnId = claim.Turn.Id;
         TurnSeq = claim.Turn.Seq;
+        Resumed = claim.Resumed;
+        TurnLength = claim.Turn.ClaimedAt is { } claimedAt
+            ? TimeSpan.FromMilliseconds(claim.DeadlineAt - claimedAt)
+            : TimeSpan.FromMilliseconds(claim.DeadlineAt - claim.ServerNow);
         Staged = staged;
         Ending = false;
         UpdateClock(claim.DeadlineAt, claim.ServerNow);
@@ -48,6 +59,8 @@ public static class TurnSession
         GameId = TurnId = null;
         Staged = null;
         TurnSeq = 0;
+        TurnLength = TimeSpan.Zero;
+        Resumed = false;
         Ending = false;
     }
 }

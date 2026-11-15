@@ -1,0 +1,15 @@
+Configs: {
+	PtwConfig: {
+		DisplayName: Ptw Config
+
+		ApiBaseUrl: {
+			Label: Api Base Url
+			Tooltip: ""
+		}
+
+		CheckpointMinutes: {
+			Label: Checkpoint Minutes
+			Tooltip: ""
+		}
+	}
+}

@@ -93,10 +93,15 @@ pnpm typecheck           # checks both hosts
 tModLoader 1.4.4 needs the **.NET 8 SDK** to build mods (on Arch: `sudo pacman -S dotnet-sdk-8.0`).
 
 1. Start tModLoader once and open **Workshop → Develop Mods**. This creates `ModSources/` and `ModSources/tModLoader.targets`.
-2. Symlink the mod into it:
+2. From the repo root, symlink the mod into `ModSources/`, and tModLoader's targets file back into `mod/`:
    ```sh
-   ln -s "$PWD/mod/PassTheWorld" ~/.local/share/Terraria/tModLoader/ModSources/PassTheWorld
+   MODSOURCES=~/.local/share/Terraria/tModLoader/ModSources   # Windows: Documents/My Games/Terraria/tModLoader/ModSources
+   ln -s "$PWD/mod/PassTheWorld" "$MODSOURCES/PassTheWorld"
+   ln -s "$MODSOURCES/tModLoader.targets" mod/tModLoader.targets
    ```
+   The second link is needed because MSBuild follows symlinks: the project's `..\tModLoader.targets` import resolves
+   relative to the repo, not `ModSources/`. It also lets editors open the project straight from the repo.
+   `mod/tModLoader.targets` is gitignored.
 3. In **Develop Mods**, click **Build + Reload**.
 4. Under **Mod Configuration → Pass the World**, set **ApiBaseUrl** to `<your site>/api`. The default is `http://localhost:8787/api`.
 

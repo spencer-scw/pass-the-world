@@ -1,3 +1,4 @@
+#nullable enable
 using Terraria.ModLoader;
 
 namespace PassTheWorld;

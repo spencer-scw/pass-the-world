@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -58,7 +59,11 @@ public class TurnSystem : ModSystem
         _warned10 = remaining <= TimeSpan.FromMinutes(10);
         _warned5 = remaining <= TimeSpan.FromMinutes(5);
         _warned1 = remaining <= TimeSpan.FromMinutes(1);
-        Main.NewText(Messages.Chat.TurnStarted(TurnSession.TurnSeq, remaining), Color.LightGreen);
+        Main.NewText(
+            TurnSession.Resumed
+                ? Messages.Chat.TurnResumed(TurnSession.TurnSeq, remaining, TurnSession.TurnLength)
+                : Messages.Chat.TurnStarted(TurnSession.TurnSeq, TurnSession.TurnLength),
+            Color.LightGreen);
     }
 
     public override void PostUpdateEverything()
