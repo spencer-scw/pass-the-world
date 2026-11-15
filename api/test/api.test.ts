@@ -2,7 +2,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, openApiConfig } from '../src/app';
 import { FsBlobStore } from '../src/node/fs-blobs';
 import { SqliteStore } from '../src/node/sqlite';
@@ -11,8 +11,16 @@ import { configFromVars, type Env } from '../src/platform';
 const savesDir = mkdtempSync(join(tmpdir(), 'ptw-test-'));
 afterAll(() => rmSync(savesDir, { recursive: true, force: true }));
 
+// Webhook posts are captured instead of sent.
+let posted: { url: string; content: string }[] = [];
+vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+  posted.push({ url, content: JSON.parse(String(init.body)).content });
+  return new Response(null, { status: 204 });
+});
+
 let env: Env;
 beforeEach(() => {
+  posted = [];
   const db = new SqliteStore(':memory:');
   db.migrate(join(__dirname, '../migrations'));
   env = { db, blobs: new FsBlobStore(savesDir), config: configFromVars({ ENVIRONMENT: 'dev' }) };
@@ -67,6 +75,37 @@ describe('PATCH /games/:id', () => {
     expect(res.status).toBe(409);
     // Sending the unchanged name alongside other edits is fine.
     expect((await call('PATCH', `/games/${id}`, { token, body: { worldName: 'Other', name: 'X' } })).status).toBe(200);
+  });
+});
+
+describe('invite announcements', () => {
+  const invites = () => posted.filter((p) => p.content.includes('/#/join/'));
+
+  it('posts the invite link when a game is created with a webhook', async () => {
+    const token = await signIn('Alice');
+    const id = await createGame(token, { discordWebhookUrl: webhook });
+    const { inviteCode } = (await call('GET', `/games/${id}`, { token })).body.game;
+    expect(invites()).toEqual([{ url: webhook, content: expect.stringContaining(`/#/join/${inviteCode}`) }]);
+  });
+
+  it('posts when the webhook is set or changed, but not on other edits', async () => {
+    const token = await signIn('Alice');
+    const id = await createGame(token);
+    expect(invites()).toHaveLength(0);
+
+    await call('PATCH', `/games/${id}`, { token, body: { discordWebhookUrl: webhook } });
+    await call('PATCH', `/games/${id}`, { token, body: { name: 'Renamed', discordWebhookUrl: webhook } });
+    await call('PATCH', `/games/${id}`, { token, body: { discordWebhookUrl: `${webhook}2` } });
+    expect(invites().map((p) => p.url)).toEqual([webhook, `${webhook}2`]);
+  });
+
+  it('posts the new link when the invite is reset', async () => {
+    const token = await signIn('Alice');
+    const id = await createGame(token, { discordWebhookUrl: webhook });
+    const { inviteCode } = (await call('POST', `/games/${id}/invite`, { token })).body;
+    expect(invites().at(-1)?.content).toContain(
+      `reset; old links no longer work. Join here: http://localhost:5173/#/join/${inviteCode}`,
+    );
   });
 });
 

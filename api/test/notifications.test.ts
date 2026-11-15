@@ -9,6 +9,12 @@ describe('formatMention', () => {
 });
 
 describe('notifications', () => {
+  it('describes the game when inviting', () => {
+    expect(notifications.invite({ turnMinutes: 60, orderMode: 'strict', link: 'L', reset: false })).toBe(
+      '📨 Come play! 60-minute turns, taken in a fixed order. Join here: L',
+    );
+  });
+
   it('announces a strict turn with its auto-skip deadline', () => {
     const msg = notifications.turnAvailable({ seq: 4, player: '<@1>', startBy: 1_700_000_000_000, link: 'L' });
     expect(msg).toBe("🌍 Turn #4: it's <@1>'s turn! Start by <t:1700000000:f> or it gets skipped. L");

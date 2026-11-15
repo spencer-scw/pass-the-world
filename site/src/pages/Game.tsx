@@ -131,7 +131,15 @@ export function GamePage({ id, me }: { id: string; me: Me }) {
             >
               Copy
             </button>
-            <button onClick={() => act(`/games/${id}/invite`)}>Reset</button>
+            <button
+              onClick={() => {
+                const posts = game.discordWebhookUrl ? ' The new one is posted to Discord.' : '';
+                if (confirm(`Reset the invite link? The current link stops working.${posts}`))
+                  act(`/games/${id}/invite`);
+              }}
+            >
+              Reset
+            </button>
           </div>
         )}
       </section>

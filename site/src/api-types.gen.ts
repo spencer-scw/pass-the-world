@@ -520,7 +520,7 @@ export interface paths {
         put?: never;
         /**
          * Create a game
-         * @description The game starts in setup. The caller becomes its owner and first admin.
+         * @description The game starts in setup. The caller becomes its owner and first admin. If a Discord webhook is set, the invite link is posted to it (also whenever the webhook changes).
          */
         post: {
             parameters: {
@@ -714,7 +714,7 @@ export interface paths {
         put?: never;
         /**
          * Reset the invite link
-         * @description Replaces the invite code. Old invite links stop working.
+         * @description Replaces the invite code. Old invite links stop working. Posts the new link to the game's webhook.
          */
         post: {
             parameters: {

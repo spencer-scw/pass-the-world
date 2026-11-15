@@ -20,6 +20,14 @@ export function formatMention(user: { display_name: string; discord_id: string |
 export const withGameName = (gameName: string, content: string) => `**${gameName}** · ${content}`;
 
 export const notifications = {
+  /** The invite link, posted when a game gets a webhook and whenever the link is reset. */
+  invite: (p: { turnMinutes: number; orderMode: 'strict' | 'open'; link: string; reset: boolean }) => {
+    const rules = `${p.turnMinutes}-minute turns, ${p.orderMode === 'strict' ? 'taken in a fixed order' : 'taken in any order'}`;
+    return p.reset
+      ? `🔗 The invite link was reset; old links no longer work. Join here: ${p.link}`
+      : `📨 Come play! ${rules}. Join here: ${p.link}`;
+  },
+
   /** A new turn opened. `player` is null in open order. `startBy` is set when a no-show will be auto-skipped. */
   turnAvailable: (p: { seq: number; player: string | null; startBy: number | null; link: string }) => {
     const who = p.player ? `it's ${p.player}'s turn` : 'the world is up for grabs';

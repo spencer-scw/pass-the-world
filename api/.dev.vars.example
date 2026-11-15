@@ -1,4 +1,4 @@
-# Copy to .dev.vars for local development. Only needed if you want to test real Discord sign-in;
+# Copy to .dev.vars for local development (read by both `pnpm dev:api` and `pnpm dev:node`). Only needed if you want to test real Discord sign-in;
 # otherwise the site's dev login works without these.
 DISCORD_CLIENT_ID=
 DISCORD_CLIENT_SECRET=
