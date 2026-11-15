@@ -1,0 +1,11 @@
+{
+  // The Cloudflare Workers runtime: shared code plus src/cloudflare.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["@cloudflare/workers-types"],
+    "tsBuildInfoFile": "./node_modules/.tmp/worker.tsbuildinfo"
+  },
+  "include": ["src"],
+  "exclude": ["src/node"]
+}

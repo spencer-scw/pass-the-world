@@ -1,0 +1,7 @@
+packages:
+  - api
+
+# esbuild and workerd (wrangler's local runtime) need their postinstall scripts.
+allowBuilds:
+  esbuild: true
+  workerd: true
