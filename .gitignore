@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+*.log
+
+# tModLoader build output
+mod/PassTheWorld/bin/
+mod/PassTheWorld/obj/
+mod/PassTheWorld/Properties/launchSettings.json
+*.local
+data/
+.env
