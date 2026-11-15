@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, openApiConfig } from '../src/app';
+import { invitePage } from '../src/invite-page';
 import { FsBlobStore } from '../src/node/fs-blobs';
 import { SqliteStore } from '../src/node/sqlite';
 import { configFromVars, type Env } from '../src/platform';
@@ -12,9 +13,11 @@ const savesDir = mkdtempSync(join(tmpdir(), 'ptw-test-'));
 afterAll(() => rmSync(savesDir, { recursive: true, force: true }));
 
 // Webhook posts are captured instead of sent.
-let posted: { url: string; content: string }[] = [];
+type Embed = { title: string; url: string; description: string; author: { name: string } };
+let posted: { url: string; content?: string; embed: Embed }[] = [];
 vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
-  posted.push({ url, content: JSON.parse(String(init.body)).content });
+  const body = JSON.parse(String(init.body));
+  posted.push({ url, content: body.content, embed: body.embeds[0] });
   return new Response(null, { status: 204 });
 });
 
@@ -79,13 +82,17 @@ describe('PATCH /games/:id', () => {
 });
 
 describe('invite announcements', () => {
-  const invites = () => posted.filter((p) => p.content.includes('/#/join/'));
+  const invites = () => posted.filter((p) => p.embed.url.includes('/join/'));
 
   it('posts the invite link when a game is created with a webhook', async () => {
     const token = await signIn('Alice');
     const id = await createGame(token, { discordWebhookUrl: webhook });
     const { inviteCode } = (await call('GET', `/games/${id}`, { token })).body.game;
-    expect(invites()).toEqual([{ url: webhook, content: expect.stringContaining(`/#/join/${inviteCode}`) }]);
+    expect(invites()).toHaveLength(1);
+    expect(invites()[0]).toMatchObject({
+      url: webhook,
+      embed: { title: '📨 Come play!', url: `http://localhost:5173/join/${inviteCode}`, author: { name: 'Test' } },
+    });
   });
 
   it('posts when the webhook is set or changed, but not on other edits', async () => {
@@ -103,9 +110,36 @@ describe('invite announcements', () => {
     const token = await signIn('Alice');
     const id = await createGame(token, { discordWebhookUrl: webhook });
     const { inviteCode } = (await call('POST', `/games/${id}/invite`, { token })).body;
-    expect(invites().at(-1)?.content).toContain(
-      `reset; old links no longer work. Join here: http://localhost:5173/#/join/${inviteCode}`,
-    );
+    expect(invites().at(-1)?.embed).toMatchObject({
+      title: '🔗 New invite link',
+      url: `http://localhost:5173/join/${inviteCode}`,
+    });
+  });
+});
+
+describe('GET /join/:code (invite preview page)', () => {
+  const page = async (path: string) => {
+    const res = await invitePage.request(path, {}, env);
+    return { status: res.status, html: await res.text() };
+  };
+
+  it('describes the game for link previews and sends browsers on to the app', async () => {
+    const token = await signIn('Alice');
+    const id = await createGame(token, { name: 'Moon <Lord> Run', turnMinutes: 45 });
+    const { inviteCode } = (await call('GET', `/games/${id}`, { token })).body.game;
+
+    const { status, html } = await page(`/join/${inviteCode}`);
+    expect(status).toBe(200);
+    expect(html).toContain('<meta property="og:title" content="Join Moon &lt;Lord&gt; Run on Pass the World">');
+    expect(html).toContain('1 player · 45-minute turns · fixed rotation.');
+    expect(html).toContain(`url=http://localhost:5173/#/join/${inviteCode}`);
+  });
+
+  it('still redirects for an unknown code, with a generic preview', async () => {
+    const { status, html } = await page('/join/nope');
+    expect(status).toBe(200);
+    expect(html).toContain('content="Pass the World invite"');
+    expect(html).toContain('url=http://localhost:5173/#/join/nope');
   });
 });
 

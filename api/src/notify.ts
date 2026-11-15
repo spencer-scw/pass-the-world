@@ -1,4 +1,4 @@
-import { formatMention, notifications, withGameName } from './copy/notifications';
+import { formatMention, notifications, type Card } from './copy/notifications';
 import { getUserById } from './db';
 import type { Env, Game } from './types';
 
@@ -8,7 +8,9 @@ export async function mention(env: Env, userId: string | null): Promise<string> 
 }
 
 export const gameLink = (env: Env, game: Game) => `${env.config.siteUrl}/#/games/${game.id}`;
-export const inviteLink = (env: Env, inviteCode: string) => `${env.config.siteUrl}/#/join/${inviteCode}`;
+/** A real path (not a #route) so link previews can show the game; see invite-page.ts. */
+export const inviteLink = (env: Env, inviteCode: string) => `${env.config.siteUrl}/join/${inviteCode}`;
+export const logoUrl = (env: Env) => `${env.config.siteUrl}/logo.png`;
 
 /** Posts the game's invite link to its webhook. */
 export async function announceInvite(env: Env, game: Game, reset = false): Promise<void> {
@@ -21,15 +23,37 @@ export async function announceInvite(env: Env, game: Game, reset = false): Promi
   );
 }
 
+/** The webhook request body for a card: an embed headed by the game's name, plus the ping as plain text. */
+export function webhookMessage(env: Env, game: Game, card: Card) {
+  const gameUrl = gameLink(env, game);
+  return {
+    content: card.ping,
+    embeds: [
+      {
+        author: { name: game.name, url: gameUrl, icon_url: logoUrl(env) },
+        title: card.title,
+        url: card.url ?? gameUrl,
+        description: card.description,
+        color: card.color,
+        fields: card.fields,
+        footer: { text: 'Pass the World' },
+        timestamp: new Date().toISOString(),
+      },
+    ],
+    allowed_mentions: { parse: ['users'] },
+  };
+}
+
 /** Posts to the game's Discord webhook, if it has one. Failures are logged, never thrown. */
-export async function notify(env: Env, game: Game, content: string): Promise<void> {
+export async function notify(env: Env, game: Game, card: Card): Promise<void> {
   if (!game.discord_webhook_url) return;
   try {
-    await fetch(game.discord_webhook_url, {
+    const res = await fetch(game.discord_webhook_url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: withGameName(game.name, content), allowed_mentions: { parse: ['users'] } }),
+      body: JSON.stringify(webhookMessage(env, game, card)),
     });
+    if (!res.ok) console.warn(`Discord webhook returned ${res.status}: ${(await res.text()).slice(0, 300)}`);
   } catch (err) {
     console.warn('Discord webhook failed', err);
   }

@@ -22,7 +22,7 @@ import {
   waitingTurn,
 } from './db';
 import { notifications, type ExpireReason, type SkipReason } from './copy/notifications';
-import { gameLink, mention, notify } from './notify';
+import { mention, notify } from './notify';
 import {
   canClaimOpenTurn,
   isPastGrace,
@@ -101,7 +101,6 @@ export async function createNextTurn(env: Env, gameId: string, now: number): Pro
       seq,
       player: userId ? await mention(env, userId) : null,
       startBy: autoSkips ? now + game.start_window_hours! * 3_600_000 : null,
-      link: gameLink(env, game),
     }),
   );
   return turn;
@@ -116,12 +115,7 @@ export async function reassignWaitingTurn(env: Env, game: Game): Promise<void> {
   const next = nextStrictPlayer(await rotationPlayers(env, game.id), prev?.user_id ?? null);
   if (next !== waiting.user_id) {
     await reassignWaitingTurnOwner(env, waiting.id, next, Date.now());
-    if (next)
-      await notify(
-        env,
-        game,
-        notifications.turnReassigned({ player: await mention(env, next), link: gameLink(env, game) }),
-      );
+    if (next) await notify(env, game, notifications.turnReassigned({ player: await mention(env, next) }));
   }
 }
 
