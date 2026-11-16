@@ -1,5 +1,7 @@
 # Checks every pull request and push to main. A push to main (i.e. a merged PR) that passes the checks is
 # deployed to Cloudflare: database migrations first, then the site and the API together.
+# The mod is built on every run too; when main has a mod version (mod/PassTheWorld/build.txt) with no GitHub
+# release yet, the built .tmod is published as release mod-v<version>.
 name: CI
 
 on:
@@ -7,6 +9,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch: # re-run a deploy by hand from the Actions tab
+
+env:
+  # The tModLoader release the mod is built against (a tag of github.com/tModLoader/tModLoader). Keep it on the
+  # current stable version, the one players have.
+  TML_VERSION: v2026.09.3.1
 
 jobs:
   check:
@@ -48,3 +55,78 @@ jobs:
         run: pnpm --filter api db:migrate:remote
       - name: Deploy site and API
         run: pnpm --filter api run deploy
+
+  mod:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Cache tModLoader
+        id: tml-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/tModLoader
+          key: tModLoader-${{ env.TML_VERSION }}
+      - name: Download tModLoader
+        if: steps.tml-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$TML_VERSION" -R tModLoader/tModLoader -p tModLoader.zip -D "$RUNNER_TEMP"
+          unzip -q "$RUNNER_TEMP/tModLoader.zip" -d "$RUNNER_TEMP/tModLoader"
+      # Locally this file is a symlink into tModLoader's ModSources folder (see README); here it points at the download.
+      - name: Point the project at tModLoader
+        run: echo "<Project><Import Project=\"$RUNNER_TEMP/tModLoader/tMLMod.targets\" /></Project>" > mod/tModLoader.targets
+      - name: Build
+        run: dotnet build mod/PassTheWorld -c Release
+      # tModLoader writes the package into its save folder, not the project.
+      - name: Collect the .tmod
+        id: tmod
+        run: |
+          path=$(find ~/.local/share/Terraria -name PassTheWorld.tmod -print -quit)
+          test -n "$path"
+          cp "$path" PassTheWorld.tmod
+          echo "version=$(sed -n 's/^version *= *//p' mod/PassTheWorld/build.txt | tr -d '\r')" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PassTheWorld-${{ steps.tmod.outputs.version }}
+          path: PassTheWorld.tmod
+    outputs:
+      version: ${{ steps.tmod.outputs.version }}
+
+  release-mod:
+    needs: [check, mod]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: mod-v${{ needs.mod.outputs.version }}
+      VERSION: ${{ needs.mod.outputs.version }}
+    steps:
+      - name: Skip if this version is already released
+        id: exists
+        run: |
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "$TAG already exists; bump version in mod/PassTheWorld/build.txt to publish a new release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/download-artifact@v4
+        if: steps.exists.outputs.skip != 'true'
+        with:
+          name: PassTheWorld-${{ needs.mod.outputs.version }}
+      - name: Create the release
+        if: steps.exists.outputs.skip != 'true'
+        run: |
+          cat > notes.md <<EOF
+          Pass the World mod $VERSION, built against tModLoader $TML_VERSION.
+
+          The easiest way to install is to subscribe on the Steam Workshop, which keeps it updated. To install this
+          file by hand instead, put \`PassTheWorld.tmod\` in your \`tModLoader/Mods\` folder and enable it under
+          **Workshop → Manage Mods**.
+          EOF
+          gh release create "$TAG" PassTheWorld.tmod -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Mod $VERSION" --notes-file notes.md

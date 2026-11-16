@@ -107,6 +107,13 @@ tModLoader 1.4.4 needs the **.NET 8 SDK** to build mods (on Arch: `sudo pacman -
    development, or `<your site>/api` for a self-hosted server. The default is the public server,
    `https://passtheworld.skrewt.dev/api`.
 
+#### Releases
+
+CI builds the mod on every PR against the tModLoader version pinned in `.github/workflows/ci.yml` (`TML_VERSION`),
+and attaches the `.tmod` to the run. When a merge to `main` carries a `version` in `build.txt` that has no release
+yet, CI publishes `PassTheWorld.tmod` as GitHub release `mod-v<version>`. So for a new mod version: bump `version`,
+merge, then **Publish** to the Workshop from tModLoader.
+
 ## Deploying
 
 ### Discord sign-in (both hosts)
