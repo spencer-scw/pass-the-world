@@ -80,6 +80,10 @@ jobs:
       - name: Point the project at tModLoader
         run: echo "<Project><Import Project=\"$RUNNER_TEMP/tModLoader/tMLMod.targets\" /></Project>" > mod/tModLoader.targets
       - name: Build
+        # Packaging loads tModLoader's bundled native libraries (FNA3D, to convert icon_small.png); its launch
+        # scripts normally put them on the library path.
+        env:
+          LD_LIBRARY_PATH: ${{ runner.temp }}/tModLoader/Libraries/Native/Linux
         run: dotnet build mod/PassTheWorld -c Release
       # tModLoader writes the package into its save folder, not the project.
       - name: Collect the .tmod
