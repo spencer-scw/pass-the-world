@@ -103,7 +103,9 @@ tModLoader 1.4.4 needs the **.NET 8 SDK** to build mods (on Arch: `sudo pacman -
    relative to the repo, not `ModSources/`. It also lets editors open the project straight from the repo.
    `mod/tModLoader.targets` is gitignored.
 3. In **Develop Mods**, click **Build + Reload**.
-4. Under **Mod Configuration → Pass the World**, set **ApiBaseUrl** to `<your site>/api`. The default is `http://localhost:8787/api`.
+4. Under **Mod Configuration → Pass the World**, set **Server address** to `http://localhost:8787/api` for local
+   development, or `<your site>/api` for a self-hosted server. The default is the public server,
+   `https://passtheworld.skrewt.dev/api`.
 
 ## Deploying
 

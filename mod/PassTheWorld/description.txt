@@ -1,3 +1,13 @@
-Pass the World: take turns playing a shared world and character, one hour at a time.
+Take turns playing one shared Terraria world and character with your friends. Each player gets a set amount of real time, then the world is passed to the next person.
 
-Turns, timers and save syncing are managed by a Pass the World web app. Open the character select screen and click "Pass the World" to link your account and take your turn.
+Games are set up on the Pass the World website, https://passtheworld.skrewt.dev: sign in with Discord, create a game, and share the invite link. Your Discord channel can get an announcement whenever it's someone's turn.
+
+In tModLoader, open the character select screen and click "Pass the World" to link your account. When it's your turn, click "Start turn" and you're loaded straight into the world. The mod:
+- shows a countdown, with warnings before time runs out
+- uploads checkpoints while you play, so a crash or a quit doesn't lose your turn
+- saves, quits and hands the world on when your time is up
+- keeps the shared world and character out of your normal world and character lists
+
+Vanilla only for now: content mods aren't kept in sync between players.
+
+Running your own server? Set the server address under Mod Configuration. Source and setup instructions: https://github.com/spencer-scw/pass-the-world

@@ -1,15 +1,23 @@
 Configs: {
 	PtwConfig: {
-		DisplayName: Ptw Config
+		DisplayName: Pass the World
 
 		ApiBaseUrl: {
-			Label: Api Base Url
-			Tooltip: ""
+			Label: Server address
+			Tooltip:
+				'''
+				The Pass the World server to use: the website's address followed by /api.
+				Leave this as it is unless your group runs its own server.
+				'''
 		}
 
 		CheckpointMinutes: {
-			Label: Checkpoint Minutes
-			Tooltip: ""
+			Label: Minutes between checkpoints
+			Tooltip:
+				'''
+				How often your progress is uploaded during a turn.
+				If the game crashes or you quit, your turn resumes from the last checkpoint.
+				'''
 		}
 	}
 }

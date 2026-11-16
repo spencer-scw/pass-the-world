@@ -1,5 +1,5 @@
 displayName = Pass the World
-author = YourName
+author = skrewt
 version = 0.1.0
 side = Client
-homepage = https://github.com/YOUR_USER/pass-the-world
+homepage = https://github.com/spencer-scw/pass-the-world
