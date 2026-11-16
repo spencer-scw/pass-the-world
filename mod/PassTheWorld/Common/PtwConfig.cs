@@ -11,9 +11,11 @@ public class PtwConfig : ModConfig
 
     public static PtwConfig Instance => ModContent.GetInstance<PtwConfig>();
 
-    /// <summary>Base URL of the Pass the World API: the site's URL plus /api, e.g. https://ptw.example.com/api</summary>
-    [DefaultValue("http://localhost:8787/api")]
-    public string ApiBaseUrl = "http://localhost:8787/api";
+    public const string DefaultApiBaseUrl = "https://passtheworld.skrewt.dev/api";
+
+    /// <summary>Base URL of the Pass the World API: the site's URL plus /api. Only change it for a self-hosted server.</summary>
+    [DefaultValue(DefaultApiBaseUrl)]
+    public string ApiBaseUrl = DefaultApiBaseUrl;
 
     /// <summary>How often to upload a mid-turn checkpoint so a crash doesn't lose the turn.</summary>
     [DefaultValue(10)]
