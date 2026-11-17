@@ -5,11 +5,14 @@ using PassTheWorld.Common;
 using PassTheWorld.UI;
 using Terraria;
 using Terraria.GameContent.UI.States;
+using Terraria.IO;
 using Terraria.ModLoader;
 
 namespace PassTheWorld.Systems;
 
-/// <summary>Detours into vanilla code: the menu entry point and the save-and-quit completion callback.</summary>
+/// <summary>
+/// Detours into vanilla code: the menu entry point, the save-and-quit completion callback, and a lock around saves.
+/// </summary>
 public class HookSystem : ModSystem
 {
     public override void Load()
@@ -17,6 +20,8 @@ public class HookSystem : ModSystem
         if (Main.dedServ) return;
         On_UICharacterSelect.OnActivate += AddMenuButton;
         On_WorldGen.SaveAndQuit += WrapSaveAndQuit;
+        On_WorldFile.SaveWorld_bool_bool += SerializeWorldSave;
+        On_Player.SavePlayer += SerializePlayerSave;
 
         // If the game crashed or was closed mid-turn, the staged copy is still in the normal folders. No world can be
         // loaded while mods load, so this is a safe moment to move it back into storage.
@@ -49,6 +54,18 @@ public class HookSystem : ModSystem
     {
         orig(self);
         PtwMenuButton.AddTo(self);
+    }
+
+    /// <summary>World saves wait for any other save or checkpoint in progress; see <see cref="SaveLock"/>.</summary>
+    private static void SerializeWorldSave(On_WorldFile.orig_SaveWorld_bool_bool orig, bool useCloudSaving, bool resetTime)
+    {
+        lock (SaveLock.Gate) orig(useCloudSaving, resetTime);
+    }
+
+    /// <summary>Player saves wait for any other save or checkpoint in progress; see <see cref="SaveLock"/>.</summary>
+    private static void SerializePlayerSave(On_Player.orig_SavePlayer orig, PlayerFileData playerFile, bool skipMapSave)
+    {
+        lock (SaveLock.Gate) orig(playerFile, skipMapSave);
     }
 
     /// <summary>Runs our upload logic after vanilla has finished writing the world and player to disk.</summary>

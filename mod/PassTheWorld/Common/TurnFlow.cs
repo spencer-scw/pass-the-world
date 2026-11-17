@@ -270,10 +270,16 @@ public static class TurnFlow
         {
             try
             {
-                // Same calls vanilla autosave makes from a worker thread.
-                Player.SavePlayer(playerFile, skipMapSave: false);
-                WorldFile.SaveWorld(useCloudSaving: false, resetTime: false);
-                await PtwApi.UploadCheckpoint(turnId, BundleStaged(staged, seq));
+                // Same calls vanilla autosave makes from a worker thread. Holding the save lock keeps autosave (or
+                // anything else that saves) from writing these files while we write or read them; see SaveLock.
+                byte[] zip;
+                lock (SaveLock.Gate)
+                {
+                    Player.SavePlayer(playerFile, skipMapSave: false);
+                    WorldFile.SaveWorld(useCloudSaving: false, resetTime: false);
+                    zip = BundleStaged(staged, seq);
+                }
+                await PtwApi.UploadCheckpoint(turnId, zip);
                 Chat(Messages.Chat.CheckpointSaved, Color.Gray);
             }
             catch (Exception e)
